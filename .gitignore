@@ -1,0 +1,13 @@
+.tools/
+.venv/
+build/
+build-host/
+build-preview/
+managed_components/
+dist/
+sdkconfig
+sdkconfig.old
+__pycache__/
+.DS_Store
+**/node_modules/
+

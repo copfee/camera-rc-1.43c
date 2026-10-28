@@ -1,0 +1,6 @@
+dependencies:
+  idf: "==5.5.3"
+  h2zero/esp-nimble-cpp: "==2.5.0"
+  lvgl/lvgl: "==9.4.0"
+  espressif/esp_lcd_sh8601: "==2.0.1"
+

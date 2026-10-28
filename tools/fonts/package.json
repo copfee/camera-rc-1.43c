@@ -1,0 +1,8 @@
+{
+  "name": "camera-rc-font-tools",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": { "generate": "node generate.mjs" },
+  "dependencies": { "lv_font_conv": "1.5.3" }
+}
+
