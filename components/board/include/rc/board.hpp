@@ -5,6 +5,7 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "lvgl.h"
+#include "rc/display_sync.hpp"
 #include "rc/shutter_audio.hpp"
 
 namespace rc {
@@ -36,6 +37,7 @@ class Board {
     void init_touch();
     void init_battery();
     static void flush(lv_display_t*, const lv_area_t*, uint8_t*);
+    static void flush_wait(lv_display_t*);
     static bool transfer_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t*, void*);
     lv_display_t* display_{nullptr};
     esp_lcd_panel_io_handle_t io_{nullptr};
@@ -45,5 +47,6 @@ class Board {
     adc_oneshot_unit_handle_t adc_{nullptr};
     adc_cali_handle_t calibration_{nullptr};
     ShutterAudio audio_;
+    DisplaySync display_sync_;
 };
 } // namespace rc

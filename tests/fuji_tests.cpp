@@ -492,5 +492,37 @@ int main() {
         finish(s, l);
         CHECK(s.snapshot().stage == LinkStage::Ready);
     }
+    {
+        Link l;
+        Store st;
+        Session empty(l, st, "id");
+        CHECK(empty.snapshot().name[0] == 0 && empty.snapshot().address[0] == 0);
+        const auto unnamed = match(basic, 7, {basic_adv}, "aa:bb:cc:dd:ee:01", 0, "");
+        CHECK(unnamed && std::strcmp(unnamed->name, "Fujifilm") == 0);
+        st.peer = peer(Protocol::Secure);
+        std::strcpy(st.peer->identity, "bb:bb:cc:dd:ee:55");
+        Session s(l, st, "id");
+        CHECK(s.snapshot().address_saved && std::strcmp(s.snapshot().name, "X-E5") == 0);
+        CHECK(std::strcmp(s.snapshot().address, st.peer->address) == 0);
+        CHECK(s.connect_saved() == Result::Ok && s.snapshot().address_saved);
+        WireEvent e{};
+        e.kind = WireKind::Advertisement;
+        e.session = l.epoch;
+        e.peer = *st.peer;
+        std::strcpy(e.peer.address, "aa:bb:cc:dd:ee:99");
+        std::strcpy(e.peer.name, "Fujifilm X-E5");
+        s.receive(e, 1);
+        CHECK(!s.snapshot().address_saved);
+        CHECK(std::strcmp(s.snapshot().address, e.peer.address) == 0);
+        CHECK(std::strcmp(s.snapshot().name, e.peer.name) == 0);
+        CHECK(s.identity().peer == st.peer->identity); // Identity remains distinct from the radio address.
+        l.event(s, WireKind::Disconnected, 2);
+        CHECK(s.snapshot().stage == LinkStage::Retry && !s.snapshot().address_saved);
+        CHECK(std::strcmp(s.snapshot().address, e.peer.address) == 0);
+        CHECK(s.disconnect() == Result::Ok && s.snapshot().address_saved);
+        CHECK(std::strcmp(s.snapshot().address, st.peer->address) == 0);
+        CHECK(s.forget() == Result::Ok);
+        CHECK(s.snapshot().name[0] == 0 && s.snapshot().address[0] == 0 && !s.snapshot().address_saved);
+    }
     std::cout << "fujifilm: protocol, handshake, cancellation and retry scenarios passed\n";
 }

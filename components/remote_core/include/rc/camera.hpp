@@ -48,7 +48,8 @@ struct LinkSnapshot {
     uint32_t scan_generation{0}, session{0}, passkey{0};
     uint8_t count{0};
     bool saved{false}, numeric_comparison{false};
-    char name[64]{"X-E5"};
+    char name[64]{}, address[18]{};
+    bool address_saved{false};
     std::array<CameraCandidate, 16> candidates{};
 };
 struct CameraEvent {

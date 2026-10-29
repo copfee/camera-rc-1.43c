@@ -110,6 +110,12 @@ LinkSnapshot Session::snapshot() const {
 void Session::snapshot(LinkSnapshot& output) const {
     output = view_;
     output.saved = saved_.has_value();
+    const auto* peer = target_ ? &*target_ : saved_ ? &*saved_ : nullptr;
+    std::snprintf(output.name, sizeof(output.name), "%s",
+                  peer ? (*peer->name ? peer->name : "Fujifilm") : "");
+    std::snprintf(output.address, sizeof(output.address), "%s", peer ? peer->address : "");
+    // During saved-camera discovery target_ is still a copy of the saved record.
+    output.address_saved = peer && (!target_ || view_.stage == LinkStage::Scanning);
 }
 CameraIdentity Session::identity() const {
     CameraIdentity i;

@@ -7,7 +7,8 @@ set(CONFIG_LV_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
 add_subdirectory("${LVGL_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/lvgl")
 add_executable(ui_preview main.cpp ../../components/ui/src/ui.cpp
-    ../../components/ui/src/font_20.c ../../components/ui/src/font_24.c)
+    ../../components/ui/src/font_20.c ../../components/ui/src/font_24.c
+    ../../components/ui/src/fujifilm_logo.c ../../components/ui/src/xe5_logo.c ../../components/ui/src/shutter_idle.c ../../components/ui/src/shutter_pressed.c)
 target_compile_features(ui_preview PRIVATE cxx_std_17)
 target_compile_definitions(ui_preview PRIVATE RC_UI_PREVIEW=1)
 target_include_directories(ui_preview PRIVATE include ../../components/ui/include
@@ -15,7 +16,8 @@ target_include_directories(ui_preview PRIVATE include ../../components/ui/includ
 target_link_libraries(ui_preview PRIVATE lvgl::lvgl)
 foreach(scenario touch-shot swipe-cancel wake-touch removed-video touch-error
         idle-touch-error touch-error-recover blocked-swipe blocked-status-tap blocked-photo photo-hold scan-select scan-cancel confirm-yes confirm-no retry
-        horizontal-navigation horizontal-reverse)
+        button-navigation no-swipe-navigation device-connect device-forget connecting-animation
+        spinner-cadence shutter-feedback device-refresh progress-continuity connection-status device-identity shooting-layout hint-fade)
     add_test(NAME ui-${scenario} COMMAND ui_preview "${CMAKE_CURRENT_BINARY_DIR}/${scenario}.ppm" ${scenario})
 endforeach()
 

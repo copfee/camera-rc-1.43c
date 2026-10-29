@@ -160,7 +160,7 @@ def preview(source):
             binary = build / "tests/preview/ui_preview.exe"
     output = ROOT / "docs/design/rendered"
     output.mkdir(parents=True, exist_ok=True)
-    for scenario in ("ready", "blocked", "status", "details", "pairing", "connecting", "confirm", "error"):
+    for scenario in ("ready", "disconnected", "blocked", "status", "status-actions", "details", "pairing", "connecting", "confirm", "error"):
         raw = build / f"{scenario}.ppm"
         run([binary, raw, scenario])
         run([sys.executable, ROOT / "tools/ppm_to_png.py", raw, output / f"{scenario}.png"])

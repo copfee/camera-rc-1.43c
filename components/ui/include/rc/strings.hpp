@@ -1,8 +1,6 @@
 #pragma once
 namespace rc::text {
-inline constexpr auto photo = "拍照";
-inline constexpr auto right_hint = "右滑查看状态";
-inline constexpr auto left_hint = "左滑返回拍摄";
+inline constexpr auto return_shoot = "返回拍摄";
 inline constexpr auto status_title = "设备状态";
 inline constexpr auto battery = "本机电量";
 inline constexpr auto charging = "正在充电";
@@ -13,6 +11,10 @@ inline constexpr auto connection = "蓝牙连接";
 inline constexpr auto signal = "信号强度";
 inline constexpr auto camera = "相机型号";
 inline constexpr auto peer = "配对身份";
+inline constexpr auto bluetooth_name = "蓝牙名称";
+inline constexpr auto bluetooth_address = "蓝牙地址";
+inline constexpr auto saved_address = "已保存地址";
+inline constexpr auto trademark = "FUJIFILM 商标及标识归其权利人所有。";
 inline constexpr auto firmware = "遥控固件";
 inline constexpr auto connect = "连接相机";
 inline constexpr auto disconnect = "断开连接";
@@ -47,7 +49,6 @@ inline constexpr auto focusing = "对焦请求已发送";
 inline constexpr auto holding = "松手停止";
 inline constexpr auto photo_pending = "正在发送拍摄指令";
 inline constexpr auto disabled_hint = "连接后可用";
-inline constexpr auto shoot_hint = "短按拍照 · 长按连拍";
 inline constexpr auto scan_title = "扫描相机";
 inline constexpr auto scan_body = "请在相机开启配对";
 inline constexpr auto scanning = "扫描中";
@@ -59,7 +60,6 @@ inline constexpr auto reject = "拒绝";
 inline constexpr auto connection_failed = "连接未完成";
 inline constexpr auto retry_connection = "重试连接";
 inline constexpr auto retry_body = "请开启相机蓝牙\n靠近后重试";
-inline constexpr auto connection_steps = "扫描 · 握手 · 就绪";
 inline constexpr auto stage_scan = "正在寻找相机";
 inline constexpr auto stage_connect = "正在建立连接";
 inline constexpr auto stage_secure = "正在安全配对";

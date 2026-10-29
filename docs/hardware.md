@@ -8,7 +8,7 @@
 | 圆屏 | 466×466，CO5300，QSPI 40MHz |
 | LCD 数据 D0–D3 | GPIO9、10、11、12 |
 | LCD CS / CLK / RESET | GPIO15 / 14 / 13 |
-| LCD TE | GPIO8，当前不启用 TE 同步 |
+| LCD TE | GPIO8，上升沿同步；每轮刷新首块等待新边沿 |
 | CST820 SDA / SCL | GPIO47 / 48，地址 0x15 |
 | 触摸 RESET / INT | GPIO16 / 17；当前轮询触摸 |
 | 电池 ADC | GPIO4，ADC1 channel3，电压分压 ×2 |
@@ -18,6 +18,12 @@
 | ES8311 I2S MCLK / BCLK / WS / DOUT | GPIO38 / 39 / 40 / 41；I2S0，16kHz、16bit 双声道 |
 
 CO5300 使用官方例程的 SH8601 兼容 QSPI 驱动及专用初始化序列和 X 偏移 8，不能替换成其他板卡的默认配置。显示使用两个内部 DMA 分块缓冲，不分配完整双帧缓冲；RGB565 在发送前交换字节。触摸坐标翻转并限制在 0–465。
+
+TE 引脚依据[官方原理图](https://files.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.43C/ESP32-S3-Touch-AMOLED-1.43C-Schematic.pdf)。按 [CO5300 数据手册](https://files.waveshare.com/wiki/common/CO5300_Datasheet_V0.00.pdf) §5.3、§7.5.28，原初始化序列的 `0x35/0x00` 已开启仅垂直同步／消隐的 TE 输出，高电平对应垂直消隐；现在通过 GPIO8 上升沿等待新周期。每轮 LVGL 刷新仅第一块等待 TE，后续 40 行分块连续发送，避免每块等待一个面板周期。开始等待前清除旧边沿，空闲期间的脉冲不会误用作新帧同步。
+
+TE 单次最多等待 25ms；缺失时继续异步刷新，1 秒后重新尝试，日志只记录降级／恢复变化。该超时与降级不释放正在 DMA 传输的缓冲。GPIO 和 DMA 中断只投递独立二值信号量；UI 任务通过 LVGL `flush_wait_cb` 等待 DMA 完成，不从中断调用 LVGL。DMA 传输提交失败不等待不存在的完成事件；已提交 DMA 若 100ms 内未完成则触发错误处理，禁止提前复用其缓冲。
+
+启动日志先显示 `TE 同步已启用`，首次等到新边沿后显示 `已捕获新 TE 边沿`。接线、脉冲周期和显示效果尚待此固件上板测量；首块同步不等于整帧传输都能落在消隐期内，完整页面与大面积滚动仍需检查传输耗时及实屏撕裂。
 
 触摸与 ES8311／ES7210 共用 I2C。根据[官方原理图](https://files.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.43C/ESP32-S3-Touch-AMOLED-1.43C-Schematic.pdf)，GPIO18 控制音频芯片电源；即使不使用音频也必须保留该供电，防止未供电的器件影响共享总线。实机对照：GPIO18 低时触摸初始化与轮询持续返回 `ESP_ERR_INVALID_STATE`；改为高、保持 GPIO46 低后，`0x15` 地址探测、芯片编号及触摸采样均成功。该历史实测未启用音频；本次新增音频与触摸共存仍需复测。
 

@@ -19,6 +19,6 @@ class Board {
     void shutter_sound() { ++shutter_sounds; }
     TouchSample touch() { return sample; }
     void brightness(unsigned) {}
-    static uint64_t milliseconds() { return 1000; }
+    static uint64_t milliseconds() { return 1000 + lv_tick_get(); }
 };
 } // namespace rc

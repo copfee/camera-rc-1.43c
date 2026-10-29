@@ -11,6 +11,10 @@
 extern "C" {
 LV_FONT_DECLARE(rc_font_20);
 LV_FONT_DECLARE(rc_font_24);
+LV_IMAGE_DECLARE(rc_fujifilm_logo);
+LV_IMAGE_DECLARE(rc_xe5_logo);
+LV_IMAGE_DECLARE(rc_shutter_idle);
+LV_IMAGE_DECLARE(rc_shutter_pressed);
 }
 
 namespace rc {
@@ -18,8 +22,9 @@ namespace {
 constexpr uint32_t kBlack = 0x000000, kSilver = 0xbcb9b0, kWhite = 0xf0ece1, kMuted = 0x8f908d;
 constexpr uint32_t kGreen = 0x8bc5a1, kAmber = 0xd4ae76;
 constexpr int kSwipe = 55;
-constexpr int kPageWidth = 466;
-constexpr uint32_t kPageSlideMs = 200;
+constexpr uint32_t kFramePeriodMs = 16, kTouchPeriodMs = 8;
+constexpr uint32_t kProgressPeriodMs = 1200;
+constexpr uint32_t kHintVisibleMs = 10000, kHintFadeMs = 500;
 
 const char* connection_text(ConnectionState state) {
     switch (state) {
@@ -66,7 +71,7 @@ const char* notice_text(const ViewModel& view) {
     case Notice::PairingTimeout:
         return text::timeout;
     default:
-        return text::shoot_hint;
+        return "";
     }
 }
 
@@ -155,25 +160,30 @@ class RoundUI {
         create();
         update();
         if (info)
-            show_page(true, false);
+            show_page(true);
         if (details)
             dialog(text::protocol_title, text::protocol_details, false);
     }
+    void preview_update() { update(); }
 #endif
     void run() {
         create();
         for (;;) {
             update();
             const uint32_t delay = lv_timer_handler();
-            vTaskDelay(pdMS_TO_TICKS(std::max<uint32_t>(2, std::min<uint32_t>(delay, 15))));
+            vTaskDelay(pdMS_TO_TICKS(std::max<uint32_t>(2, std::min(delay, kTouchPeriodMs))));
         }
     }
 
   private:
     Board& board_;
     lv_obj_t *root_{}, *shoot_{}, *info_{}, *photo_{}, *status_{}, *hint_{};
-    lv_obj_t *percent_{}, *voltage_{}, *charge_{}, *link_{}, *signal_{}, *peer_{}, *connect_{};
+    lv_obj_t *percent_{}, *voltage_{}, *charge_{}, *link_{}, *signal_{}, *connect_{};
+    lv_obj_t *camera_name_{}, *address_{}, *address_caption_{}, *device_tail_{};
     lv_obj_t *connect_label_{}, *modal_{}, *repair_{};
+    lv_obj_t *modal_title_{}, *progress_arc_{}, *progress_stage_{};
+    lv_timer_t* progress_timer_{};
+    uint32_t progress_started_{};
     lv_indev_t* input_{};
     Snapshot state_{};
     bool info_visible_{false}, gesture_down_{false}, swallow_{false}, cancelled_{false};
@@ -181,6 +191,7 @@ class RoundUI {
     int start_x_{0}, start_y_{0};
     DisplayPower power_{DisplayPower::Active};
     uint64_t next_update_{0};
+    uint64_t hint_started_{0};
     LinkStage previous_stage_{LinkStage::Idle};
     uint8_t previous_count_{0};
     uint32_t previous_session_{0}, previous_scan_{0};
@@ -191,7 +202,6 @@ class RoundUI {
         uint32_t generation, id;
     };
     std::array<CandidateBinding, 16> bindings_{};
-    lv_obj_t* model_{};
     std::array<lv_obj_t*, 16> candidate_names_{}, candidate_details_{};
 
     static RoundUI& self(lv_event_t* e) { return *static_cast<RoundUI*>(lv_event_get_user_data(e)); }
@@ -224,9 +234,7 @@ class RoundUI {
             if (!ui.swallow_ && !ui.cancelled_ && std::abs(dx) >= kSwipe && std::abs(dx) > std::abs(dy)) {
                 post(Action::Cancel);
                 ui.cancelled_ = true;
-                // Modal dialogs never turn a swipe into navigation or a shutter release.
-                if (!ui.modal_ && ((dx > 0 && !ui.info_visible_) || (dx < 0 && ui.info_visible_)))
-                    ui.show_page(dx > 0);
+                // Horizontal drags cancel held input without navigating or clicking.
                 lv_indev_wait_release(input);
             }
             if (!ui.swallow_ && !ui.cancelled_)
@@ -271,13 +279,14 @@ class RoundUI {
         if (ui.state_.view.connection == ConnectionState::ProtocolBlocked)
             ui.dialog(text::protocol_title, text::protocol_details, false);
         else if (ui.state_.view.connection == ConnectionState::Ready)
-            ui.show_page(true);
+            return;
         else if (ui.state_.link.stage != LinkStage::Idle && ui.state_.link.stage != LinkStage::Failed)
             ui.connection_overlay();
         else
             post(Action::Connect);
     }
     static void info_event(lv_event_t* e) { self(e).show_page(true); }
+    static void shoot_event(lv_event_t* e) { self(e).show_page(false); }
     static void connect_event(lv_event_t* e) {
         auto& ui = self(e);
         post(ui.active() ? Action::Disconnect : Action::Connect);
@@ -313,11 +322,17 @@ class RoundUI {
         post(Action::Forget);
     }
     void close_dialog() {
+        if (progress_timer_) {
+            lv_timer_delete(progress_timer_);
+            progress_timer_ = nullptr;
+        }
         if (modal_) {
             lv_obj_delete(modal_);
             modal_ = nullptr;
+            lv_obj_remove_flag(info_visible_ ? info_ : shoot_, LV_OBJ_FLAG_HIDDEN);
         }
         overlay_ = Overlay::None;
+        modal_title_ = progress_arc_ = progress_stage_ = nullptr;
         candidate_names_.fill(nullptr);
         candidate_details_.fill(nullptr);
         post(Action::Cancel);
@@ -332,10 +347,20 @@ class RoundUI {
     void begin_overlay(Overlay kind, const char* title) {
         close_dialog();
         overlay_ = kind;
+        // Covered pages still receive state updates, without invalidating pixels behind the modal.
+        lv_obj_add_flag(shoot_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(info_, LV_OBJ_FLAG_HIDDEN);
         modal_ = box(root_, 0, 0, 466, 466);
         lv_obj_add_flag(modal_, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_style_radius(modal_, LV_RADIUS_CIRCLE, 0);
-        label(modal_, title, 93, 74, 280, &rc_font_24);
+        if (kind == Overlay::Progress) {
+            auto* logo = lv_image_create(modal_);
+            lv_image_set_src(logo, &rc_fujifilm_logo);
+            lv_obj_set_pos(logo, 135, 63);
+            lv_obj_remove_flag(logo, LV_OBJ_FLAG_CLICKABLE);
+        } else {
+            modal_title_ = label(modal_, title, 93, 74, 280, &rc_font_24);
+        }
     }
     void dialog(const char* title, const char* body, bool confirmation) {
         begin_overlay(confirmation ? Overlay::Forget : Overlay::Protocol, title);
@@ -343,6 +368,13 @@ class RoundUI {
         if (confirmation)
             action_button(modal_, text::confirm, 123, 290, 220, true, forget_event);
         action_button(modal_, confirmation ? text::cancel : text::back, 123, 362, 220, false, close_event);
+    }
+    static void progress_tick(lv_timer_t* timer) {
+        auto& ui = *static_cast<RoundUI*>(lv_timer_get_user_data(timer));
+        // One clock and a fixed arc keep the loop seam continuous, including delayed UI ticks.
+        const uint32_t phase =
+            (lv_tick_elaps(ui.progress_started_) % kProgressPeriodMs) * 360 / kProgressPeriodMs;
+        lv_arc_set_rotation(ui.progress_arc_, 270 + phase);
     }
     void connection_overlay() {
         const auto stage = state_.link.stage;
@@ -388,76 +420,67 @@ class RoundUI {
             action_button(modal_, text::retry_connection, 123, 300, 220, true, retry_event);
             action_button(modal_, text::back, 123, 370, 220, false, close_event);
         } else if (stage != LinkStage::Idle && stage != LinkStage::Ready) {
-            begin_overlay(Overlay::Progress, state_.link.name);
-            auto* arc = lv_arc_create(modal_);
-            lv_obj_set_pos(arc, 197, 132);
-            lv_obj_set_size(arc, 72, 72);
-            lv_arc_set_rotation(arc, 270);
-            lv_arc_set_bg_angles(arc, 0, 360);
-            lv_arc_set_angles(arc, 0, 90);
-            lv_obj_remove_style(arc, nullptr, LV_PART_KNOB);
-            lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_set_style_arc_color(arc, lv_color_hex(0x282828), LV_PART_MAIN);
-            lv_obj_set_style_arc_color(arc, lv_color_hex(kAmber), LV_PART_INDICATOR);
-            lv_obj_set_style_arc_width(arc, 4, LV_PART_MAIN);
-            lv_obj_set_style_arc_width(arc, 4, LV_PART_INDICATOR);
-            label(modal_, text::preparing, 83, 230, 300, &rc_font_24);
-            label(modal_, stage_text(stage), 83, 268, 300, &rc_font_20, kAmber);
-            label(modal_, text::connection_steps, 73, 309, 320, &rc_font_20, kMuted);
-            action_button(modal_, text::cancel, 123, 362, 220, false, stop_event);
+            if (overlay_ != Overlay::Progress) {
+                begin_overlay(Overlay::Progress, state_.link.name);
+                progress_arc_ = lv_arc_create(modal_);
+                lv_obj_set_pos(progress_arc_, 197, 132);
+                lv_obj_set_size(progress_arc_, 72, 72);
+                lv_obj_remove_style(progress_arc_, nullptr, LV_PART_KNOB);
+                lv_obj_remove_flag(progress_arc_, LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_set_style_arc_color(progress_arc_, lv_color_hex(0x282828), LV_PART_MAIN);
+                lv_obj_set_style_arc_color(progress_arc_, lv_color_hex(kAmber), LV_PART_INDICATOR);
+                lv_obj_set_style_arc_width(progress_arc_, 4, LV_PART_MAIN);
+                lv_obj_set_style_arc_width(progress_arc_, 4, LV_PART_INDICATOR);
+                lv_arc_set_bg_angles(progress_arc_, 0, 360);
+                lv_arc_set_angles(progress_arc_, 0, 90);
+                lv_arc_set_rotation(progress_arc_, 270);
+                progress_started_ = lv_tick_get();
+                progress_timer_ = lv_timer_create(progress_tick, kFramePeriodMs, this);
+                label(modal_, text::preparing, 83, 230, 300, &rc_font_24);
+                progress_stage_ = label(modal_, stage_text(stage), 83, 268, 300, &rc_font_20, kAmber);
+                action_button(modal_, text::cancel, 123, 362, 220, false, stop_event);
+            }
+            set_text(progress_stage_, stage_text(stage));
         } else if (overlay_ != Overlay::Forget && overlay_ != Overlay::Protocol)
             close_dialog();
     }
 
-    static void page_position(void* context, int32_t offset) {
-        auto& ui = *static_cast<RoundUI*>(context);
-        lv_obj_set_x(ui.shoot_, offset);
-        lv_obj_set_x(ui.info_, offset - kPageWidth);
-    }
-
-    void finish_page_slide() { lv_obj_add_flag(info_visible_ ? shoot_ : info_, LV_OBJ_FLAG_HIDDEN); }
-
-    void show_page(bool info, bool animate = true) {
+    void show_page(bool info) {
         if (info_visible_ == info)
             return;
         post(Action::Cancel);
-        // One shared offset keeps both pages on the horizontal axis. Restart from
-        // the current position when another gesture reverses an unfinished slide.
-        lv_anim_delete(this, page_position);
         info_visible_ = info;
-        lv_obj_remove_flag(shoot_, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_remove_flag(info_, LV_OBJ_FLAG_HIDDEN);
-        const int target = info ? kPageWidth : 0;
-        if (!animate) {
-            page_position(this, target);
-            finish_page_slide();
-            return;
-        }
-        lv_anim_t slide;
-        lv_anim_init(&slide);
-        lv_anim_set_var(&slide, this);
-        lv_anim_set_exec_cb(&slide, page_position);
-        lv_anim_set_values(&slide, lv_obj_get_x(shoot_), target);
-        lv_anim_set_duration(&slide, kPageSlideMs);
-        lv_anim_set_path_cb(&slide, lv_anim_path_ease_out);
-        lv_anim_set_completed_cb(
-            &slide, [](lv_anim_t* animation) { static_cast<RoundUI*>(animation->var)->finish_page_slide(); });
-        lv_anim_start(&slide);
+        lv_obj_add_flag(info ? shoot_ : info_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(info ? info_ : shoot_, LV_OBJ_FLAG_HIDDEN);
     }
 
-    lv_obj_t* row(lv_obj_t* content, const char* name, const char* value, int y) {
+    void page_link(lv_obj_t* page, const char* caption, lv_event_cb_t callback) {
+        auto* link = box(page, 133, 402, 200, 56);
+        lv_obj_add_flag(link, LV_OBJ_FLAG_CLICKABLE);
+        label(link, caption, 8, 10, 184, &rc_font_20, kMuted);
+        lv_obj_add_event_cb(link, callback, LV_EVENT_CLICKED, this);
+    }
+
+    lv_obj_t* row(lv_obj_t* content, const char* name, const char* value, int y,
+                  lv_obj_t** caption = nullptr) {
         auto* line = box(content, 0, y + 44, 298, 1, 0x292929);
         (void)line;
         auto* key = label(content, name, 2, y + 10, 120, &rc_font_20, kMuted);
         lv_obj_set_style_text_align(key, LV_TEXT_ALIGN_LEFT, 0);
+        if (caption)
+            *caption = key;
         auto* item = label(content, value, 120, y + 10, 176);
         lv_obj_set_style_text_align(item, LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_set_height(item, lv_font_get_line_height(&rc_font_20));
         lv_label_set_long_mode(item, LV_LABEL_LONG_DOT);
         return item;
     }
 
     void create() {
         root_ = lv_screen_active();
+        // Also apply at runtime for existing sdkconfig files that still use LVGL's 33ms default.
+        lv_timer_set_period(lv_display_get_refr_timer(lv_obj_get_display(root_)), kFramePeriodMs);
+        lv_timer_set_period(lv_anim_get_timer(), kFramePeriodMs);
         lv_obj_remove_style_all(root_);
         lv_obj_set_style_bg_color(root_, lv_color_hex(kBlack), 0);
         lv_obj_set_style_bg_opa(root_, LV_OPA_COVER, 0);
@@ -465,37 +488,30 @@ class RoundUI {
         lv_obj_set_style_clip_corner(root_, true, 0);
         lv_obj_remove_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
         shoot_ = box(root_, 0, 0, 466, 466);
-        model_ = label(shoot_, "X-E5", 103, 40, 260, &lv_font_montserrat_28);
-        status_ = label(shoot_, text::unpaired, 93, 82, 280, &rc_font_24, kMuted);
+        auto* logo = lv_image_create(shoot_);
+        lv_image_set_src(logo, &rc_fujifilm_logo);
+        lv_obj_set_pos(logo, 135, 22);
+        lv_obj_add_flag(logo, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(logo, 5);
+        lv_obj_add_event_cb(logo, info_event, LV_EVENT_CLICKED, this);
+        auto* model_logo = lv_image_create(shoot_);
+        lv_image_set_src(model_logo, &rc_xe5_logo);
+        lv_obj_set_pos(model_logo, 183, 73);
+        lv_obj_remove_flag(model_logo, LV_OBJ_FLAG_CLICKABLE);
+        status_ = label(shoot_, text::unpaired, 93, 420, 280, &rc_font_24, kMuted);
         lv_obj_add_flag(status_, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_ext_click_area(status_, 14);
+        lv_obj_set_ext_click_area(status_, 3);
         lv_obj_add_event_cb(status_, status_event, LV_EVENT_CLICKED, this);
-        photo_ = button(shoot_, 121, 130, 224, 224, kWhite);
-        lv_obj_set_style_border_width(photo_, 0, 0);
-        lv_obj_set_style_outline_width(photo_, 2, 0);
-        lv_obj_set_style_outline_pad(photo_, 6, 0);
-        lv_obj_set_style_outline_color(photo_, lv_color_hex(0x555550), 0);
-        auto* camera_icon = box(photo_, 76, 63, 72, 48, kWhite);
-        lv_obj_set_style_radius(camera_icon, 8, 0);
-        lv_obj_set_style_border_width(camera_icon, 3, 0);
-        lv_obj_set_style_border_color(camera_icon, lv_color_hex(kBlack), 0);
-        auto* mount = box(photo_, 98, 55, 28, 10, kBlack);
-        auto* lens = box(camera_icon, 23, 11, 26, 26, kWhite);
-        lv_obj_set_style_radius(lens, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_width(lens, 3, 0);
-        lv_obj_set_style_border_color(lens, lv_color_hex(kBlack), 0);
-        for (auto* o : {camera_icon, lens, mount})
-            lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
-        label(photo_, text::photo, 32, 132, 160, &rc_font_24, kBlack);
+        photo_ = lv_imagebutton_create(shoot_);
+        lv_obj_set_pos(photo_, 103, 104);
+        lv_obj_set_size(photo_, 260, 260);
+        lv_imagebutton_set_src(photo_, LV_IMAGEBUTTON_STATE_RELEASED, nullptr, &rc_shutter_idle, nullptr);
+        lv_imagebutton_set_src(photo_, LV_IMAGEBUTTON_STATE_PRESSED, nullptr, &rc_shutter_pressed, nullptr);
         lv_obj_add_event_cb(photo_, photo_event, LV_EVENT_ALL, this);
-        hint_ = label(shoot_, text::shoot_hint, 58, 371, 350, &rc_font_20, kMuted);
-        auto* devices = box(shoot_, 133, 402, 200, 56);
-        lv_obj_add_flag(devices, LV_OBJ_FLAG_CLICKABLE);
-        label(devices, text::status_title, 8, 10, 184, &rc_font_20, kMuted);
-        lv_obj_add_event_cb(devices, info_event, LV_EVENT_CLICKED, this);
-        info_ = box(root_, -kPageWidth, 0, 466, 466);
+        hint_ = label(shoot_, "", 58, 384, 350, &rc_font_24, kMuted);
+        info_ = box(root_, 0, 0, 466, 466);
         label(info_, text::status_title, 103, 44, 260, &rc_font_24);
-        auto* content = box(info_, 84, 96, 298, 232);
+        auto* content = box(info_, 84, 96, 298, 296);
         lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_scroll_dir(content, LV_DIR_VER);
         lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_OFF);
@@ -505,19 +521,22 @@ class RoundUI {
         charge_ = label(content, text::unknown, 49, 118, 200, &rc_font_20, kMuted);
         link_ = row(content, text::connection, text::unpaired, 137);
         signal_ = row(content, text::signal, text::unknown, 187);
-        peer_ = row(content, text::peer, text::unpaired, 237);
-        row(content, text::firmware, "0.2.0", 287);
-        repair_ = action_button(content, text::repair, 39, 348, 220, false, repair_event);
-        label(content, "", 0, 418, 298);
-        connect_ = button(info_, 123, 344, 220, 56, kBlack);
-        connect_label_ = label(connect_, text::connect, 8, 15, 204);
-        lv_obj_add_event_cb(connect_, connect_event, LV_EVENT_CLICKED, this);
-        label(info_, text::left_hint, 103, 419, 260, &rc_font_20, kMuted);
+        camera_name_ = row(content, text::bluetooth_name, text::unpaired, 237);
+        device_tail_ = box(content, 0, 287, 298, 275);
+        address_ = row(device_tail_, text::bluetooth_address, text::unpaired, 0, &address_caption_);
+        row(device_tail_, text::firmware, "0.2.0", 50);
+        connect_ = action_button(device_tail_, text::connect, 0, 111, 142, false, connect_event);
+        connect_label_ = lv_obj_get_child(connect_, 0);
+        repair_ = action_button(device_tail_, text::repair, 156, 111, 142, false, repair_event);
+        auto* trademark = label(device_tail_, text::trademark, 2, 187, 294, &rc_font_20, kMuted);
+        lv_label_set_long_mode(trademark, LV_LABEL_LONG_WRAP);
+        page_link(info_, text::return_shoot, shoot_event);
         lv_obj_add_flag(info_, LV_OBJ_FLAG_HIDDEN);
         input_ = lv_indev_create();
         lv_indev_set_type(input_, LV_INDEV_TYPE_POINTER);
         lv_indev_set_user_data(input_, this);
         lv_indev_set_read_cb(input_, touch_read);
+        lv_timer_set_period(lv_indev_get_read_timer(input_), kTouchPeriodMs);
     }
 
     static void set_text(lv_obj_t* object, const char* value) {
@@ -528,23 +547,35 @@ class RoundUI {
         const auto now = Board::milliseconds();
         if (now < next_update_)
             return;
-        next_update_ = now + 50;
+        next_update_ = now + kFramePeriodMs;
         state_ = snapshot();
         if (state_.view.power != power_) {
             power_ = state_.view.power;
             board_.brightness(power_ == DisplayPower::Off ? 0 : power_ == DisplayPower::Dim ? 15 : 70);
         }
         // Keep the dimmed shutter touchable for local audio, without camera commands.
-        lv_obj_set_style_opa(photo_, state_.view.can_photo ? LV_OPA_COVER : LV_OPA_40, 0);
+        const lv_opa_t photo_opacity = state_.view.can_photo ? LV_OPA_COVER : LV_OPA_40;
+        if (lv_obj_get_style_opa(photo_, LV_PART_MAIN) != photo_opacity)
+            lv_obj_set_style_opa(photo_, photo_opacity, 0);
 
         const auto connection = state_.view.connection;
         set_text(status_, connection_text(connection));
-        lv_obj_set_style_text_color(status_,
-                                    lv_color_hex(connection == ConnectionState::Ready ? kGreen
-                                                 : active()                           ? kAmber
-                                                                                      : kMuted),
-                                    0);
-        set_text(hint_, notice_text(state_.view));
+        const auto status_color = lv_color_hex(connection == ConnectionState::Ready ? kGreen
+                                               : active()                           ? kAmber
+                                                                                    : kMuted);
+        if (!lv_color_eq(lv_obj_get_style_text_color(status_, LV_PART_MAIN), status_color))
+            lv_obj_set_style_text_color(status_, status_color, 0);
+        const char* hint = notice_text(state_.view);
+        if (std::strcmp(lv_label_get_text(hint_), hint) != 0) {
+            set_text(hint_, hint);
+            hint_started_ = now;
+        }
+        const auto hint_elapsed = now - hint_started_;
+        const lv_opa_t hint_opacity = hint_elapsed <= kHintVisibleMs ? static_cast<lv_opa_t>(LV_OPA_COVER)
+            : hint_elapsed >= kHintVisibleMs + kHintFadeMs ? static_cast<lv_opa_t>(LV_OPA_TRANSP)
+            : static_cast<lv_opa_t>((kHintVisibleMs + kHintFadeMs - hint_elapsed) * LV_OPA_COVER / kHintFadeMs);
+        if (lv_obj_get_style_opa(hint_, LV_PART_MAIN) != hint_opacity)
+            lv_obj_set_style_opa(hint_, hint_opacity, 0);
         set_text(link_, connection_text(connection));
         set_enabled(connect_, connection != ConnectionState::ProtocolBlocked);
         set_enabled(repair_, connection != ConnectionState::ProtocolBlocked);
@@ -573,8 +604,10 @@ class RoundUI {
             set_text(signal_, signal);
         } else
             set_text(signal_, text::unknown);
-        set_text(peer_, state_.peer[0] ? state_.peer : text::unpaired);
-        set_text(model_, state_.link.name);
+        const bool has_address = state_.link.address[0] != 0;
+        set_text(camera_name_, state_.link.name[0] ? state_.link.name : text::unpaired);
+        set_text(address_, has_address ? state_.link.address : text::unpaired);
+        set_text(address_caption_, state_.link.address_saved ? text::saved_address : text::bluetooth_address);
         if (overlay_ == Overlay::Scan && state_.link.count == previous_count_ &&
             state_.link.scan_generation == previous_scan_) {
             for (size_t i = 0; i < state_.link.count; ++i) {
@@ -590,7 +623,7 @@ class RoundUI {
         const bool changed = previous_stage_ != state_.link.stage || previous_count_ != state_.link.count ||
                              previous_session_ != state_.link.session ||
                              previous_scan_ != state_.link.scan_generation;
-        if (changed) {
+        if (changed || overlay_ == Overlay::Progress) {
             if (overlay_ != Overlay::Forget && overlay_ != Overlay::Protocol)
                 connection_overlay();
             previous_stage_ = state_.link.stage;
@@ -600,6 +633,10 @@ class RoundUI {
         }
     }
 };
+
+#ifdef RC_UI_PREVIEW
+RoundUI* preview_ui{};
+#endif
 
 void ui_task(void* argument) {
     RoundUI ui(*static_cast<Board*>(argument));
@@ -615,8 +652,11 @@ void ui_start(Board& board) {
 #ifdef RC_UI_PREVIEW
 void ui_preview(Board& board, bool info, bool details) {
     // Keep callbacks alive until the headless renderer exits.
-    static auto* preview = new RoundUI(board);
-    preview->preview(info, details);
+    preview_ui = new RoundUI(board);
+    preview_ui->preview(info, details);
+}
+void ui_preview_update() {
+    preview_ui->preview_update();
 }
 #endif
 } // namespace rc

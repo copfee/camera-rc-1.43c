@@ -65,10 +65,12 @@ void Board::init() {
 }
 
 void Board::init_panel() {
+    display_sync_.init();
     // CO5300 uses the compatible SH8601 QSPI transport with this exact vendor sequence.
     static const uint8_t p00[] = {0x00}, p80[] = {0x80}, p55[] = {0x55}, p20[] = {0x20};
     static const uint8_t pff[] = {0xff}, pc0[] = {0xc0};
     static const uint8_t cols[] = {0x00, 0x06, 0x01, 0xd7}, rows[] = {0x00, 0x00, 0x01, 0xd1};
+    // 35h/00h enables the vertical-blanking TE output used by GPIO8 synchronization.
     static const sh8601_lcd_init_cmd_t commands[] = {
         {0xfe, p00, 1, 0},  {0xc4, p80, 1, 0},  {0x3a, p55, 1, 0},   {0x35, p00, 1, 0},
         {0x53, p20, 1, 0},  {0x51, pff, 1, 0},  {0x36, pc0, 1, 0},   {0x63, pff, 1, 0},
@@ -117,6 +119,7 @@ void Board::init_panel() {
     assert(a && b);
     lv_display_set_buffers(display_, a, b, bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display_, flush);
+    lv_display_set_flush_wait_cb(display_, flush_wait);
     lv_display_add_event_cb(display_, round_area, LV_EVENT_INVALIDATE_AREA, nullptr);
 }
 
@@ -124,18 +127,24 @@ void Board::flush(lv_display_t* display, const lv_area_t* area, uint8_t* pixels)
     auto* board = static_cast<Board*>(lv_display_get_user_data(display));
     const auto count = (area->x2 - area->x1 + 1) * (area->y2 - area->y1 + 1);
     lv_draw_sw_rgb565_swap(pixels, count);
+    board->display_sync_.begin_flush(lv_display_flush_is_last(display));
     const auto result =
         esp_lcd_panel_draw_bitmap(board->panel_, area->x1, area->y1, area->x2 + 1, area->y2 + 1, pixels);
     if (result != ESP_OK) {
+        board->display_sync_.submission_failed();
+        ESP_LOGE(kTag, "LCD 传输提交失败：%s", esp_err_to_name(result));
         lv_display_flush_ready(display);
     }
 }
 
+void Board::flush_wait(lv_display_t* display) {
+    auto* board = static_cast<Board*>(lv_display_get_user_data(display));
+    board->display_sync_.wait_transfer();
+}
+
 bool Board::transfer_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t*, void* context) {
     auto* board = static_cast<Board*>(context);
-    if (board->display_)
-        lv_display_flush_ready(board->display_);
-    return false;
+    return board->display_sync_.transfer_done_from_isr();
 }
 
 void Board::brightness(unsigned percent) {
