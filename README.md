@@ -18,16 +18,21 @@
 
 ## 快速开始
 
-打开 **IDF_v5.5.3_PowerShell**，进入项目根目录后执行：
+在 **IDF_v5.5.3** 环境中进入项目根目录，执行以下命令：
 
 ```powershell
 cd C:\path\to\camera-rc-1.43c  # 替换为实际项目路径
-idf.py build
-idf.py -p COM5 flash             # 替换为实际串口
-idf.py -p COM5 monitor
+.\project.ps1 setup
+.\project.ps1 doctor
+.\project.ps1 test
+.\project.ps1 build
+.\project.ps1 flash --port COM5  # 替换为实际串口
+.\project.ps1 monitor --port COM5
 ```
 
-普通刷写保留 NVS 和配对记录。退出串口监视器按 `Ctrl+]`。主机回归测试可在安装 CMake 和 C++17 编译器后，在项目根目录运行 `python tools/project.py test`。
+macOS 和 Linux 下使用 [project.sh](https://github.com/copfee/camera-rc-1.43c/blob/main/project.sh)，例如 `./project.sh build`。
+
+需要 Git、Python 3.10–3.13、CMake 和 C++17 编译器。`setup` 可在工程内安装 SDK 和工具链；已有 SDK 时可通过 `IDF_PATH` 指定。普通刷写保留 NVS 和配对记录；完整擦除会删除配对记录，需显式使用 `erase --confirm-erase`。
 
 ## 使用
 
