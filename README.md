@@ -18,18 +18,16 @@
 
 ## 快速开始
 
-需要 Git、Python 3.10–3.13、CMake 和 C++17 编译器。固件构建使用精确的 **ESP-IDF v5.5.3**；`setup` 可在工程内安装 SDK 和工具链。
+打开 **IDF_v5.5.3_PowerShell**，进入项目根目录后执行：
 
-```sh
-python tools/project.py setup
-python tools/project.py doctor
-python tools/project.py test
-python tools/project.py build
-python tools/project.py flash --port COM5  # 替换为实际串口
-python tools/project.py monitor --port COM5
+```powershell
+cd C:\path\to\camera-rc-1.43c  # 替换为实际项目路径
+idf.py build
+idf.py -p COM5 flash             # 替换为实际串口
+idf.py -p COM5 monitor
 ```
 
-Windows 也可用 `py -3.13`，macOS／Linux 可用 `python3.13`。已有 SDK 时可通过 `IDF_PATH` 指定。普通刷写保留 NVS 和配对记录；完整擦除会删除配对记录，需显式使用 `erase --confirm-erase`。
+普通刷写保留 NVS 和配对记录。退出串口监视器按 `Ctrl+]`。主机回归测试可在安装 CMake 和 C++17 编译器后，在项目根目录运行 `python tools/project.py test`。
 
 ## 使用
 
