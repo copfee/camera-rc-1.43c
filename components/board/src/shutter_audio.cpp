@@ -4,6 +4,8 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "rc/shutter_sound.hpp"
+#include <algorithm>
+#include <array>
 
 namespace rc {
 namespace {
@@ -74,7 +76,7 @@ bool ShutterAudio::init(i2c_master_bus_handle_t bus) {
     }
     if (xTaskCreate(worker, "shutter_audio", 4096, this, 3, &task_) != pdPASS)
         goto failed;
-    ESP_LOGI(kTag, "快门音效已就绪：ES8311，16kHz，100毫秒；MCLK=38 BCLK=39 WS=40 DOUT=41 PA=46");
+    ESP_LOGI(kTag, "快门音效已就绪：ES8311，16kHz；MCLK=38 BCLK=39 WS=40 DOUT=41 PA=46");
     return true;
 
 failed:
@@ -121,16 +123,19 @@ void ShutterAudio::play() {
 
 void ShutterAudio::worker(void* argument) {
     auto& audio = *static_cast<ShutterAudio*>(argument);
-    static const auto pcm = make_shutter_sound();
+    std::array<int16_t, kChunkFrames * 2> pcm{};
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         gpio_set_level(kAmplifier, 1);
         vTaskDelay(pdMS_TO_TICKS(5));
         bool played = true;
         for (size_t frame = 0; frame < kShutterFrames; frame += kChunkFrames) {
-            const size_t bytes = std::min(kChunkFrames, kShutterFrames - frame) * 2 * sizeof(int16_t);
+            const size_t frames = std::min(kChunkFrames, kShutterFrames - frame);
+            for (size_t i = 0; i < frames; ++i)
+                pcm[i * 2] = pcm[i * 2 + 1] = kShutterPcm[frame + i];
+            const size_t bytes = frames * 2 * sizeof(int16_t);
             size_t written = 0;
-            const auto result = i2s_channel_write(audio.tx_, pcm.data() + frame * 2, bytes, &written, 40);
+            const auto result = i2s_channel_write(audio.tx_, pcm.data(), bytes, &written, 40);
             if (result != ESP_OK || written != bytes) {
                 ESP_LOGW(kTag, "快门音效写入失败：%s 字节数=%u/%u", esp_err_to_name(result),
                          static_cast<unsigned>(written), static_cast<unsigned>(bytes));

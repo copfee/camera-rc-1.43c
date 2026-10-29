@@ -11,7 +11,7 @@
 | 显示传输 | espressif/esp_lcd_sh8601 2.0.1 | Apache-2.0 |
 | ES8311 音频驱动 | espressif/esp_codec_dev 1.5.8 | Apache-2.0 |
 
-板卡适配已从原例程重写：移除录音／文件系统／演示功能与单例 I2C 封装，加入错误处理、坐标边界、独立 DMA/LVGL 显示移植和 ADC 有效性判断。快门反馈使用原创合成 PCM，音频接线和功放增益来自固定提交的 `04_Audio_Test`，ES8311 初始化参考 ESP-IDF v5.5.3 的 CC0-1.0 示例 `examples/peripherals/i2s/i2s_codec/i2s_es8311/main/i2s_es8311_example.c`。仍保留板厂归属与许可全文于 `LICENSES/Waveshare-Apache-2.0.txt`。
+板卡适配已从原例程重写：移除录音／文件系统／演示功能与单例 I2C 封装，加入错误处理、坐标边界、独立 DMA/LVGL 显示移植和 ADC 有效性判断。快门反馈使用用户提供的音频转换而成的 PCM，其授权信息未随文件提供；音频接线和功放增益来自固定提交的 `04_Audio_Test`，ES8311 初始化参考 ESP-IDF v5.5.3 的 CC0-1.0 示例 `examples/peripherals/i2s/i2s_codec/i2s_es8311/main/i2s_es8311_example.c`。仍保留板厂归属与许可全文于 `LICENSES/Waveshare-Apache-2.0.txt`。
 
 字体原文件 SHA-256：`2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b`。中文生成字体命名为 **RC font**，仅包含界面所需字形，许可全文见 `LICENSES/Noto-OFL-1.1.txt`。原字体元数据：Copyright 2014-2021 Adobe (http://www.adobe.com/). Noto is a trademark of Google Inc.
 
