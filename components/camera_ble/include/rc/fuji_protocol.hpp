@@ -74,7 +74,7 @@ class ILink {
     virtual bool scan(uint32_t session, Millis duration) = 0;
     virtual void stop_scan() = 0;
     virtual bool connect(const Peer& peer, uint32_t session) = 0;
-    virtual bool secure() = 0;
+    virtual bool secure(bool allow_pairing) = 0;
     virtual bool confirm(bool accept) = 0;
     virtual bool gatt(const Step& step, uint32_t session, uint32_t ticket) = 0;
     virtual void close() = 0;

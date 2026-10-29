@@ -1,6 +1,7 @@
 #include "rc/xe5_camera.hpp"
 #include "NimBLEDevice.h"
 #include "NimBLEUUID.h"
+#include "ble_hs_pvcy_priv.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_random.h"
@@ -48,6 +49,25 @@ void log_bond_status(const char* phase, const ble_addr_t& address) {
     ESP_LOGI(tag, "绑定检查：阶段=%s 绑定数=%d 地址类型=%u 查询返回码=%d LTK存在=%d IRK存在=%d", phase,
              NimBLEDevice::getNumBonds(), address.type, status, status == 0 && value.ltk_present,
              status == 0 && value.irk_present);
+    ble_store_key_local_irk local_key{};
+    const int addr_status = ble_hs_id_copy_addr(BLE_ADDR_PUBLIC, local_key.addr.val, nullptr);
+    local_key.addr.type = BLE_ADDR_PUBLIC;
+    ble_store_value_local_irk local{};
+    const int local_status = addr_status ? addr_status : ble_store_read_local_irk(&local_key, &local);
+    const uint8_t* active_irk = nullptr;
+    const int active_status = ble_hs_pvcy_our_irk(&active_irk);
+    const bool active_present = active_status == 0 && active_irk;
+    ble_store_value_sec ours{};
+    const int our_status = ble_store_read_our_sec(&key, &ours);
+    ESP_LOGI(tag,
+             "本机密钥检查：阶段=%s 本机IRK查询=%d 活动IRK查询=%d 活动与存储IRK一致=%d "
+             "本端绑定查询=%d 已分发IRK存在=%d 活动与已分发IRK一致=%d 双向LTK一致=%d",
+             phase, local_status, active_status,
+             local_status == 0 && active_present && !std::memcmp(local.irk, active_irk, 16), our_status,
+             our_status == 0 && ours.irk_present,
+             our_status == 0 && ours.irk_present && active_present && !std::memcmp(ours.irk, active_irk, 16),
+             status == 0 && our_status == 0 && value.ltk_present && ours.ltk_present &&
+                 !std::memcmp(value.ltk, ours.ltk, 16));
 }
 
 class PeerStore final : public IStore {
@@ -76,6 +96,19 @@ class PeerStore final : public IStore {
             nvs_close(handle_);
     }
     std::optional<Peer> load() const override { return peer_; }
+    esp_err_t read_local_irk(std::array<uint8_t, 16>& irk) const {
+        if (!opened_)
+            return ESP_ERR_INVALID_STATE;
+        size_t size = irk.size();
+        const auto status = nvs_get_blob(handle_, "local_irk_v1", irk.data(), &size);
+        return status == ESP_OK && size != irk.size() ? ESP_ERR_INVALID_SIZE : status;
+    }
+    bool save_local_irk(const std::array<uint8_t, 16>& irk) {
+        if (!opened_)
+            return false;
+        const auto status = nvs_set_blob(handle_, "local_irk_v1", irk.data(), irk.size());
+        return status == ESP_OK && nvs_commit(handle_) == ESP_OK;
+    }
     bool save(const Peer& p) override {
         if (!opened_)
             return false;
@@ -108,6 +141,83 @@ class PeerStore final : public IStore {
         return true;
     }
 };
+
+// Runs once on the owner, after host sync and before any scan/connection.
+// IDF can restore peer keys while losing its separate local-IRK lookup.
+bool restore_local_identity(PeerStore& store) {
+    std::array<uint8_t, 16> irk{};
+    const int loaded = store.read_local_irk(irk);
+    if (loaded != ESP_OK && loaded != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE(tag, "本机身份记录读取失败：返回码=%d；保留全部配对数据", loaded);
+        return false;
+    }
+    if (loaded == ESP_ERR_NVS_NOT_FOUND) {
+        bool recovered = false;
+        if (const auto saved = store.load()) {
+            const NimBLEAddress address(saved->identity[0] ? saved->identity : saved->address,
+                                        saved->identity[0] ? saved->identity_type : saved->type);
+            log_bond_status("本机身份恢复前", *address.getBase());
+            ble_store_key_sec key{};
+            key.peer_addr = *address.getBase();
+            key.peer_addr.type &= 1;
+            ble_store_value_sec ours{};
+            int status = ble_store_read_our_sec(&key, &ours);
+            if (status) {
+                key.peer_addr.type = !key.peer_addr.type;
+                status = ble_store_read_our_sec(&key, &ours);
+            }
+            if (status == 0 && ours.irk_present) {
+                std::copy_n(ours.irk, irk.size(), irk.begin());
+                recovered = true;
+            }
+        }
+        if (!recovered) {
+            // Never choose a new identity while an existing bond needs recovery.
+            if (NimBLEDevice::getNumBonds() != 0) {
+                ESP_LOGE(tag, "无法恢复已分发本机IRK；保留绑定，停止连接");
+                return false;
+            }
+            const uint8_t* active = nullptr;
+            if (ble_hs_pvcy_our_irk(&active) != 0 || !active)
+                return false;
+            std::copy_n(active, irk.size(), irk.begin());
+        }
+        if (!store.save_local_irk(irk)) {
+            ESP_LOGE(tag, "本机身份持久化失败；停止连接");
+            return false;
+        }
+        ESP_LOGI(tag, "本机身份已持久化：从已有绑定恢复=%d", recovered);
+    }
+    const uint8_t* active = nullptr;
+    if (ble_hs_pvcy_our_irk(&active) != 0 || !active)
+        return false;
+    const bool changed = std::memcmp(active, irk.data(), irk.size()) != 0;
+    int status = 0;
+    if (changed) {
+        status = ble_hs_pvcy_set_our_irk(irk.data());
+        if (!status) {
+            // set_our_irk clears the controller resolving list. Restore every
+            // stored peer, preserving unrelated bonds as well as this camera.
+            int entry_status = 0;
+            status = ble_store_iterate(
+                BLE_STORE_OBJ_TYPE_PEER_SEC,
+                [](int, ble_store_value* value, void* context) {
+                    const auto& peer = value->sec;
+                    auto& result = *static_cast<int*>(context);
+                    result = peer.irk_present
+                                 ? ble_hs_pvcy_add_entry(peer.peer_addr.val, peer.peer_addr.type, peer.irk)
+                                 : 0;
+                    return result;
+                },
+                &entry_status);
+            // ble_store_iterate returns 0 when a callback asks it to stop.
+            if (!status)
+                status = entry_status;
+        }
+    }
+    ESP_LOGI(tag, "本机身份恢复：已校正活动IRK=%d 解析列表返回码=%d", changed, status);
+    return status == 0;
+}
 enum class RadioKind {
     Adv,
     ScanEnd,
@@ -115,6 +225,8 @@ enum class RadioKind {
     Disconnected,
     Security,
     Passkey,
+    PairingComplete,
+    RepeatPairing,
     Identity,
     Service,
     Characteristic,
@@ -226,6 +338,16 @@ class Radio final : public ILink {
             e.action = g->passkey.params.action;
             e.pin = g->passkey.params.numcmp;
             break;
+        case BLE_GAP_EVENT_PARING_COMPLETE:
+            e.kind = RadioKind::PairingComplete;
+            e.handle = g->pairing_complete.conn_handle;
+            e.status = g->pairing_complete.status;
+            break;
+        case BLE_GAP_EVENT_REPEAT_PAIRING:
+            e.kind = RadioKind::RepeatPairing;
+            e.handle = g->repeat_pairing.conn_handle;
+            c->self->enqueue(e);
+            return BLE_GAP_REPEAT_PAIRING_IGNORE;
         default:
             return 0;
         }
@@ -424,16 +546,17 @@ class Radio final : public ILink {
             NimBLEDevice::deinit(true);
         vQueueDelete(queue_);
     }
-    bool init(const std::string& name) {
+    bool init(const std::string& name, PeerStore& store) {
         started_ = NimBLEDevice::init(name);
         if (!started_)
+            return false;
+        if (!restore_local_identity(store))
             return false;
         NimBLEDevice::setSecurityAuth(true, true, true);
         NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_YESNO);
         NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
         NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
-        NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_RPA_PUBLIC_DEFAULT);
-        return true;
+        return NimBLEDevice::setOwnAddrType(BLE_OWN_ADDR_RPA_PUBLIC_DEFAULT);
     }
     bool scan(uint32_t epoch, Millis duration) override {
         stop_scan();
@@ -484,7 +607,7 @@ class Radio final : public ILink {
             delete c;
         return r == 0;
     }
-    bool secure() override {
+    bool secure(bool allow_pairing) override {
         ble_gap_conn_desc description{};
         const int found = ble_gap_conn_find(connection_, &description);
         if (found) {
@@ -492,9 +615,32 @@ class Radio final : public ILink {
             return false;
         }
         log_bond_status("认证前", description.peer_id_addr);
+        const uint8_t* irk = nullptr;
+        const bool active = ble_hs_pvcy_our_irk(&irk) == 0 && irk;
+        const bool private_address = description.our_ota_addr.type == BLE_ADDR_RANDOM &&
+                                     (description.our_ota_addr.val[5] & 0xc0) == 0x40;
+        ESP_LOGI(
+            tag, "连接身份检查：允许新配对=%d 本机身份类型=%u 本机空中类型=%u 使用RPA=%d RPA与活动IRK一致=%d",
+            allow_pairing, description.our_id_addr.type, description.our_ota_addr.type, private_address,
+            active && private_address && ble_hs_pvcy_resolve_with_irk(description.our_ota_addr.val, irk));
+        if (!allow_pairing) {
+            ble_store_key_sec key{};
+            key.peer_addr = description.peer_id_addr;
+            key.peer_addr.type &= 1;
+            ble_store_value_sec value{};
+            int found_key = ble_store_read_peer_sec(&key, &value);
+            if (found_key) {
+                key.peer_addr.type = !key.peer_addr.type;
+                found_key = ble_store_read_peer_sec(&key, &value);
+            }
+            if (found_key || !value.ltk_present) {
+                ESP_LOGW(tag, "重连无可用LTK，停止；保留绑定并等待显式配对");
+                return false;
+            }
+        }
         const int status = ble_gap_security_initiate(connection_);
         ESP_LOGI(tag, "发起安全认证：会话=%lu 返回码=%d", static_cast<unsigned long>(session_), status);
-        return status == 0;
+        return status == 0 || status == BLE_HS_EALREADY;
     }
     bool confirm(bool accept) override {
         ble_sm_io io{};
@@ -565,12 +711,24 @@ class Radio final : public ILink {
                 s.receive(e, now);
                 break;
             case RadioKind::Disconnected:
+                ESP_LOGI(tag, "BLE 断开：会话=%lu 原因=%d", static_cast<unsigned long>(r.session), r.status);
                 connection_ = BLE_HS_CONN_HANDLE_NONE;
                 e.kind = WireKind::Disconnected;
                 s.receive(e, now);
                 break;
+            case RadioKind::PairingComplete:
+                ESP_LOGI(tag, "安全过程结束：会话=%lu 状态=%d", static_cast<unsigned long>(r.session),
+                         r.status);
+                break;
+            case RadioKind::RepeatPairing:
+                ESP_LOGW(tag, "对端请求重复配对：会话=%lu；保留已有绑定",
+                         static_cast<unsigned long>(r.session));
+                break;
             case RadioKind::Security:
             case RadioKind::Identity: {
+                if (r.kind == RadioKind::Security)
+                    ESP_LOGI(tag, "加密状态事件：会话=%lu 返回码=%d", static_cast<unsigned long>(r.session),
+                             r.status);
                 ble_gap_conn_desc d{};
                 if (ble_gap_conn_find(r.handle, &d))
                     break;
@@ -674,7 +832,7 @@ struct Xe5Camera::Impl {
     Radio radio;
     fuji::Session session;
     bool available;
-    Impl() : session(radio, store, identifier()), available(radio.init(identifier())) {
+    Impl() : session(radio, store, identifier()), available(radio.init(identifier(), store)) {
         ESP_LOGI(tag, "蓝牙主机初始化：已就绪=%d 已保存相机=%d", available, session.has_saved_peer());
         if (available) {
             ESP_LOGI(tag, "恢复 BLE 绑定：数量=%d", NimBLEDevice::getNumBonds());

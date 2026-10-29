@@ -32,8 +32,8 @@ struct Store : IStore {
 };
 struct Link : ILink {
     uint32_t epoch{}, ticket{};
-    unsigned scans{0}, connects{0}, closes{0};
-    bool ok{true}, accepted{false};
+    unsigned scans{0}, connects{0}, closes{0}, confirmations{0};
+    bool ok{true}, accepted{false}, confirm_ok{true}, pairing_allowed{false};
     const char* reject_chr{nullptr};
     std::vector<Step> writes;
     Peer target{};
@@ -49,10 +49,14 @@ struct Link : ILink {
         ++connects;
         return ok;
     }
-    bool secure() override { return ok; }
-    bool confirm(bool yes) override {
-        accepted = yes;
+    bool secure(bool allow_pairing) override {
+        pairing_allowed = allow_pairing;
         return ok;
+    }
+    bool confirm(bool yes) override {
+        ++confirmations;
+        accepted = yes;
+        return ok && confirm_ok;
     }
     bool gatt(const Step& s, uint32_t e, uint32_t t) override {
         epoch = e;
@@ -233,8 +237,8 @@ int main() {
         Link l;
         Store st;
         Session s(l, st, "id");
-        // Numeric comparison must proceed through encryption and the acknowledged
-        // handshake before publishing Ready or persisting the selected camera.
+        // New pairing displays the code and cannot confirm, save or start GATT
+        // until the user approves; encryption and handshake must still succeed.
         CHECK(s.start_pairing() == Result::Ok);
         WireEvent e{};
         e.kind = WireKind::Advertisement;
@@ -249,8 +253,12 @@ int main() {
         e.kind = WireKind::Compare;
         e.passkey = 123456;
         s.receive(e, 2);
+        CHECK(l.pairing_allowed && !l.accepted && l.confirmations == 0);
+        CHECK(s.snapshot().stage == LinkStage::Confirming);
+        CHECK(s.snapshot().numeric_comparison && s.snapshot().passkey == 123456);
+        CHECK(st.saves == 0 && l.writes.empty());
         CHECK(s.confirm_pairing(e.session, true) == Result::Ok);
-        CHECK(l.accepted && st.saves == 0 && l.writes.empty());
+        CHECK(l.accepted && l.confirmations == 1 && s.snapshot().stage == LinkStage::Securing);
         e.kind = WireKind::Secure;
         e.encrypted = e.bonded = e.authenticated = true;
         s.receive(e, 3);
@@ -265,6 +273,9 @@ int main() {
         s.snapshot(view);
         CHECK(view.stage == LinkStage::Idle && view.saved && st.saves == 1);
         CHECK(s.confirm_pairing(e.session, true) == Result::InvalidPeer);
+        e.kind = WireKind::Compare;
+        s.receive(e, 5); // A cancelled comparison cannot send an acceptance.
+        CHECK(l.confirmations == 1);
     }
     {
         Store st;
@@ -299,6 +310,7 @@ int main() {
         CHECK(std::strcmp(restored.target.identity, st.peer->identity) == 0);
         restored.event(rebooted, WireKind::Connected, 2);
         CHECK(rebooted.snapshot().stage == LinkStage::Securing);
+        CHECK(!restored.pairing_allowed);
         seen.kind = WireKind::Secure;
         seen.encrypted = seen.bonded = seen.authenticated = true;
         rebooted.receive(seen, 3);
@@ -322,10 +334,13 @@ int main() {
         e.passkey = 482916;
         s.receive(e, 2);
         CHECK(s.snapshot().stage == LinkStage::Confirming);
-        CHECK(!l.accepted);
+        CHECK(!l.accepted && l.confirmations == 0);
         CHECK(s.confirm_pairing(e.session + 1, true) == Result::InvalidPeer);
         CHECK(s.confirm_pairing(e.session, false) == Result::Ok);
         CHECK(s.snapshot().error == LinkError::Rejected);
+        s.receive(e, 4);
+        CHECK(s.snapshot().stage == LinkStage::Failed);
+        CHECK(l.confirmations == 1 && st.saves == 0);
     }
     {
         Link l;
@@ -419,6 +434,55 @@ int main() {
         choose(s, l, peer(Protocol::Secure));
         finish(s, l);
         CHECK(s.snapshot().stage == LinkStage::Ready);
+    }
+    {
+        Link l;
+        Store st;
+        Session s(l, st, "id");
+        s.start_pairing();
+        WireEvent e{};
+        e.kind = WireKind::Advertisement;
+        e.session = l.epoch;
+        e.peer = peer(Protocol::Secure);
+        s.receive(e, 1);
+        s.select_candidate(s.snapshot().scan_generation, 1);
+        l.event(s, WireKind::Connected);
+        e.kind = WireKind::Compare;
+        l.confirm_ok = false;
+        s.receive(e, 2);
+        CHECK(l.confirmations == 0 && s.snapshot().stage == LinkStage::Confirming);
+        CHECK(s.confirm_pairing(e.session, true) == Result::TransportError);
+        CHECK(s.snapshot().error == LinkError::Authentication);
+        CHECK(l.confirmations == 1 && l.writes.empty() && st.saves == 0);
+        s.receive(e, 3);
+        CHECK(l.confirmations == 1);
+    }
+    for (bool comparison : {false, true}) {
+        Link l;
+        Store st;
+        st.peer = peer(Protocol::Secure);
+        Session s(l, st, "id");
+        CHECK(s.connect_saved() == Result::Ok);
+        WireEvent e{};
+        e.kind = WireKind::Advertisement;
+        e.session = l.epoch;
+        e.peer = *st.peer;
+        s.receive(e, 1);
+        l.event(s, WireKind::Connected);
+        e.kind = WireKind::Compare;
+        auto stale = e;
+        ++stale.session;
+        s.receive(stale, 2);
+        CHECK(l.confirmations == 0);
+        CHECK(!l.pairing_allowed);
+        if (comparison)
+            s.receive(e, 3); // Restoring a saved bond cannot silently start new pairing.
+        else
+            l.event(s, WireKind::Fault, 4); // Queue overflow closes before any later confirmation.
+        s.receive(e, 5);
+        CHECK(l.confirmations == 0);
+        CHECK(s.snapshot().error == (comparison ? LinkError::Authentication : LinkError::Overflow));
+        CHECK(l.writes.empty() && st.saves == 0);
     }
     {
         Link l;

@@ -15,6 +15,6 @@
 
 字体原文件 SHA-256：`2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b`。中文生成字体命名为 **RC font**，仅包含界面所需字形，许可全文见 `LICENSES/Noto-OFL-1.1.txt`。原字体元数据：Copyright 2014-2021 Adobe (http://www.adobe.com/). Noto is a trademark of Google Inc.
 
-[furble](https://github.com/gkoh/furble/tree/0cac22aacc3d9ef250be40849118af78a5f39f27)（MIT，Copyright (c) 2020 Guo-Rong Koh）是本项目富士 Basic/Secure 广播识别、UUID、握手顺序、订阅规则及快门报文的来源，固定提交 `0cac22aacc3d9ef250be40849118af78a5f39f27`。协议已改写为本项目的异步状态机与 NimBLE host 传输，未引入 Arduino 或 M5Stack 运行时。许可全文见 `LICENSES/furble-MIT.txt`。与上游的有意差异：只保存一台；开机自动连接；数字比对要求用户确认；必须检查快门写权限、每次写入结果及中性释放；所有取消和发送均由单 owner 任务处理。上游兼容报告不等于本项目 X-E5 实机验收。
+[furble](https://github.com/gkoh/furble/tree/0cac22aacc3d9ef250be40849118af78a5f39f27)（MIT，Copyright (c) 2020 Guo-Rong Koh）是本项目富士 Basic/Secure 广播识别、UUID、握手顺序、订阅规则及快门报文的来源，固定提交 `0cac22aacc3d9ef250be40849118af78a5f39f27`。协议已改写为本项目的异步状态机与 NimBLE host 传输，未引入 Arduino 或 M5Stack 运行时。许可全文见 `LICENSES/furble-MIT.txt`。上游 `patches/ble_gap.patch` 的地址类型重查逻辑移植为 `tools/cmake/furble_nimble_patch.cmake`，仅生成构建目录副本，不修改 SDK；省略上游地址日志，保留查询返回码。与上游的有意差异：数字比对须人工确认；禁止旧绑定恢复失败后自动新配对；只保存一台；开机自动连接；必须检查快门写权限、每次写入结果及中性释放；所有取消和发送均由单 owner 任务处理。上游兼容报告不等于本项目 X-E5 实机验收。
 
 构建依赖保留各自 LICENSE；发布源代码时保留本文件及 LICENSES。imagegen 图稿仅用于本项目视觉设计，不构成富士官方产品或协议认证。

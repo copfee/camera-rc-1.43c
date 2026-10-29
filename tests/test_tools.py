@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -21,6 +22,30 @@ bundle = module("flash_bundle")
 
 
 class ToolsTests(unittest.TestCase):
+    def test_nimble_patch_preserves_sdk_and_rejects_changed_or_ambiguous_source(self):
+        original = ("        rc = ble_store_read_peer_sec(&key_sec, &value_sec);\n"
+                    "        if (rc == 0 && value_sec.ltk_present) {")
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "sdk.c"
+            output = Path(folder) / "build" / "ble_gap.c"
+            command = ["cmake", f"-DRC_NIMBLE_SOURCE={source}", f"-DRC_NIMBLE_OUTPUT={output}",
+                       "-P", str(ROOT / "tools/cmake/furble_nimble_patch.cmake")]
+            content = ("/* SDK fixture */\n" + original + "\n/* remainder */\n").encode()
+            source.write_bytes(content)
+            subprocess.run(command, check=True, capture_output=True)
+            self.assertEqual(source.read_bytes(), content)
+            patched = output.read_text()
+            self.assertIn("key_sec.peer_addr.type = !key_sec.peer_addr.type;", patched)
+            self.assertEqual(patched.count("ble_store_read_peer_sec(&key_sec, &value_sec)"), 2)
+            self.assertIn("/* remainder */", patched)
+            subprocess.run(command, check=True, capture_output=True)
+            self.assertEqual(output.read_text(), patched)
+            for unsupported in ("changed SDK", original + "\n" + original):
+                source.write_text(unsupported)
+                result = subprocess.run(command, capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(output.read_text(), patched)
+
     def test_no_erase_without_explicit_confirmation(self):
         with patch("sys.argv", ["project.py", "erase"]), patch.object(project, "idf") as run:
             with self.assertRaisesRegex(RuntimeError, "confirm-erase"):

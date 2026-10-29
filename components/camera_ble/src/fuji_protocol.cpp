@@ -129,6 +129,8 @@ Result Session::disconnect() {
     ++view_.session;
     ++view_.scan_generation;
     view_.count = 0;
+    view_.numeric_comparison = false;
+    view_.passkey = 0;
     view_.stage = LinkStage::Idle;
     link_.close();
     output_.clear();
@@ -237,6 +239,8 @@ void Session::fail(LinkError reason, bool retryable) {
     control_ = release_pending_ = false;
     steps_.clear();
     view_.error = reason;
+    view_.numeric_comparison = false;
+    view_.passkey = 0;
     if (active_ && !pairing_ && saved_ && retryable && attempt_ < 2) {
         ++view_.session;
         view_.stage = LinkStage::Retry;
@@ -261,6 +265,8 @@ Result Session::confirm_pairing(uint32_t s, bool accept) {
         fail(LinkError::Rejected, false);
         return Result::Ok;
     }
+    view_.numeric_comparison = false;
+    view_.passkey = 0;
     view_.stage = LinkStage::Securing;
     return Result::Ok;
 }
@@ -337,7 +343,7 @@ void Session::receive(const WireEvent& e, Millis now) {
         deadline_ = now + 30000;
         if (target_->protocol == Protocol::Secure) {
             view_.stage = LinkStage::Securing;
-            if (!link_.secure())
+            if (!link_.secure(pairing_))
                 fail(LinkError::Authentication);
         } else
             begin_handshake();
@@ -349,6 +355,11 @@ void Session::receive(const WireEvent& e, Millis now) {
         return;
     }
     if (e.kind == WireKind::Compare && view_.stage == LinkStage::Securing) {
+        // A saved connection must restore its bond, never silently re-pair.
+        if (!pairing_) {
+            fail(LinkError::Authentication, false);
+            return;
+        }
         view_.stage = LinkStage::Confirming;
         view_.passkey = e.passkey;
         view_.numeric_comparison = true;
@@ -357,7 +368,7 @@ void Session::receive(const WireEvent& e, Millis now) {
     if (e.kind == WireKind::Secure && view_.stage == LinkStage::Securing) {
         // Like upstream secureConnection(), accept the negotiated security level.
         // A camera with no numeric-comparison IO may use encrypted Just Works.
-        // Numeric comparison, when requested, still requires explicit approval.
+        // New numeric comparisons require explicit owner/user confirmation.
         if (e.status || !e.encrypted || !e.bonded) {
             fail(LinkError::Authentication, false);
             return;
