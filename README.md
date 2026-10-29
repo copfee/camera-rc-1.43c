@@ -2,7 +2,9 @@
 
 基于 ESP-IDF 的富士相机蓝牙遥控器，适用于 **Waveshare ESP32-S3-Touch-AMOLED-1.43C**。支持单相机配对、开机自动连接、触摸或 BOOT 快门，以及圆屏设备状态显示。
 
-项目已实现基于 furble 的富士 Basic／Secure 连接与拍照协议，并在本项目 X-E5 上验证了开发板重启后复用绑定自动连接。完整拍摄、连拍及长期稳定性仍待实机验收；没有已验证的独立录像命令。
+项目已实现富士 Basic／Secure 连接与拍照协议，并在本项目 X-E5 上验证了开发板重启后复用绑定自动连接。
+
+参考项目：[furble](https://github.com/gkoh/furble/tree/0cac22aacc3d9ef250be40849118af78a5f39f27)（富士连接与拍摄协议）、[Waveshare 1.43C](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.43C/tree/8cea11ddae6167dd591d1f5465fd7b615080360f)（板卡配置与示例）。
 
 ## 界面
 
