@@ -88,7 +88,8 @@ int main(int argc, char** argv) {
     const bool cadence_input = scenario == "spinner-cadence" || scenario == "shutter-feedback" ||
                                scenario == "device-refresh" || scenario == "progress-continuity";
     const bool navigation_input = scenario == "button-navigation" || scenario == "no-swipe-navigation" ||
-                                  scenario == "device-connect" || scenario == "device-forget";
+                                  scenario == "edge-gestures" || scenario == "device-connect" ||
+                                  scenario == "device-forget";
     const bool progress_input = scenario == "connecting-animation" || scenario == "spinner-cadence" ||
                                 scenario == "progress-continuity";
     const bool blocked_input =
@@ -96,12 +97,14 @@ int main(int argc, char** argv) {
     const bool connection_input = scenario == "scan-select" || scenario == "scan-cancel" ||
                                   scenario == "confirm-yes" || scenario == "confirm-no" ||
                                   scenario == "retry";
-    const bool interaction = layout_input || status_input || identity_input || cadence_input ||
-                             navigation_input || progress_input || connection_input || blocked_input ||
-                             scenario == "idle-touch-error" || scenario == "touch-error-recover" ||
-                             scenario == "touch-shot" || scenario == "swipe-cancel" ||
-                             scenario == "wake-touch" || scenario == "removed-video" ||
-                             scenario == "touch-error" || scenario == "photo-hold";
+    const bool settings_input = scenario == "device-settings" || scenario == "fullscreen";
+    const bool fullscreen_start = scenario == "fullscreen-start";
+    const bool interaction =
+        fullscreen_start || settings_input || layout_input || status_input || identity_input || cadence_input ||
+        navigation_input || progress_input || connection_input || blocked_input ||
+        scenario == "idle-touch-error" || scenario == "touch-error-recover" || scenario == "touch-shot" ||
+        scenario == "swipe-cancel" || scenario == "wake-touch" || scenario == "removed-video" ||
+        scenario == "touch-error" || scenario == "photo-hold";
     if (scenario != "ready" && scenario != "blocked" && scenario != "status" && scenario != "details" &&
         scenario != "pairing" && scenario != "connecting" && scenario != "confirm" && scenario != "error" &&
         scenario != "status-actions" && scenario != "disconnected" && !interaction)
@@ -176,9 +179,10 @@ int main(int argc, char** argv) {
                                                          : LV_DISPLAY_RENDER_MODE_FULL);
     lv_display_set_flush_cb(display, flush);
     rc::Board board;
+    rc::Board::fullscreen_value = fullscreen_start;
     rc::ui_preview(board,
                    scenario == "status" || scenario == "status-actions" || scenario == "device-refresh" ||
-                       identity_input,
+                       identity_input || settings_input,
                    scenario == "details");
     if (scenario == "status-actions") {
         auto* content = lv_obj_get_parent(find_label(lv_screen_active(), rc::text::battery));
@@ -208,6 +212,11 @@ int main(int argc, char** argv) {
             sample(true, x, y);
             sample(false, x, y);
         };
+        const auto swipe = [&](int x1, int y1, int x2, int y2) {
+            sample(true, x1, y1);
+            sample(true, x2, y2);
+            sample(false, x2, y2);
+        };
         const auto advance_timers = [&](unsigned duration) {
             for (unsigned elapsed = 0; elapsed < duration; ++elapsed) {
                 lv_tick_inc(1);
@@ -215,7 +224,141 @@ int main(int argc, char** argv) {
                 lv_timer_handler();
             }
         };
-        if (scenario == "hint-fade") {
+        if (fullscreen_start) {
+            auto* photo = find_photo(lv_screen_active());
+            lv_obj_update_layout(lv_screen_active());
+            if (!rc::Board::fullscreen_value || lv_obj_get_width(photo) != 466)
+                return 118;
+        } else if (scenario == "fullscreen") {
+            auto* on = find_label(lv_screen_active(), rc::text::fullscreen_on);
+            auto* off = find_label(lv_screen_active(), rc::text::fullscreen_off);
+            auto* photo = find_photo(lv_screen_active());
+            auto* shoot = lv_obj_get_parent(photo);
+            if (!on || !off || rc::Board::fullscreen_value)
+                return 110;
+            lv_obj_send_event(lv_obj_get_parent(on), LV_EVENT_CLICKED, nullptr);
+            lv_obj_update_layout(lv_screen_active());
+            if (!rc::Board::fullscreen_value || lv_obj_get_width(photo) != 466 ||
+                lv_obj_get_height(photo) != 466 || lv_obj_get_x(photo) != 0 || lv_obj_get_y(photo) != 0)
+                return 111;
+            auto* status = find_label(shoot, rc::text::ready);
+            if (!status || !lv_obj_has_flag(status, LV_OBJ_FLAG_HIDDEN))
+                return 112;
+            lv_obj_send_event(lv_obj_get_parent(off), LV_EVENT_CLICKED, nullptr);
+            lv_obj_update_layout(lv_screen_active());
+            if (rc::Board::fullscreen_value || lv_obj_get_width(photo) != 260 ||
+                lv_obj_has_flag(status, LV_OBJ_FLAG_HIDDEN))
+                return 113;
+            lv_obj_send_event(lv_obj_get_parent(on), LV_EVENT_CLICKED, nullptr);
+            auto* back = find_label(lv_screen_active(), rc::text::return_shoot);
+            lv_obj_send_event(lv_obj_get_parent(back), LV_EVENT_CLICKED, nullptr);
+            tap(233, 103);
+            tap(233, 364);
+            tap(0, 104);
+            if (rc::Board::shutter_sounds || std::count(rc::actions.begin(), rc::actions.end(), rc::Action::PhotoDown))
+                return 114;
+            tap(233, 104);
+            tap(233, 363);
+            if (rc::Board::shutter_sounds != 2 ||
+                std::count(rc::actions.begin(), rc::actions.end(), rc::Action::PhotoDown) != 2 ||
+                std::count(rc::actions.begin(), rc::actions.end(), rc::Action::PhotoUp) != 2)
+                return 115;
+            sample(true, 233, 233);
+            sample(true, 310, 233);
+            sample(false, 310, 233);
+            if (!std::count(rc::actions.begin(), rc::actions.end(), rc::Action::Cancel))
+                return 116;
+            sample(true, 233, 233);
+            sample(false, 0, 0, true);
+            sample(false, 233, 233);
+            state.view.power = rc::DisplayPower::Off;
+            advance_timers(32);
+            const auto sounds = rc::Board::shutter_sounds;
+            tap(233, 233);
+            if (rc::Board::shutter_sounds != sounds)
+                return 119;
+            state.view.power = rc::DisplayPower::Active;
+            state.view.connection = rc::ConnectionState::Disconnected;
+            state.view.can_photo = false;
+            state.link.stage = rc::LinkStage::Idle;
+            advance_timers(32);
+            swipe(233, 420, 233, 360);
+            if (!std::count(rc::actions.begin(), rc::actions.end(), rc::Action::Connect) ||
+                rc::Board::shutter_sounds != sounds)
+                return 120;
+            swipe(233, 40, 233, 100);
+            if (lv_obj_is_visible(shoot))
+                return 117;
+        } else if (settings_input) {
+            auto* content = lv_obj_get_parent(find_label(lv_screen_active(), rc::text::battery));
+            auto* volume = find_label(content, rc::text::volume);
+            if (!volume)
+                return 90;
+            lv_obj_scroll_to_view(volume, LV_ANIM_OFF);
+            lv_obj_update_layout(lv_screen_active());
+            const char* captions[] = {rc::text::volume_off, rc::text::volume_low, rc::text::volume_medium,
+                                      rc::text::volume_high};
+            for (unsigned i = 0; i < 4; ++i) {
+                auto* label = find_label(content, captions[i]);
+                if (!label)
+                    return 91;
+                lv_obj_send_event(lv_obj_get_parent(label), LV_EVENT_CLICKED, nullptr);
+                if (rc::Board::volume != i)
+                    return 92;
+            }
+            auto* brightness = find_label(content, rc::text::brightness);
+            if (!brightness)
+                return 93;
+            auto* tail = lv_obj_get_parent(brightness);
+            auto* firmware = find_label(content, rc::text::firmware);
+            if (!firmware || lv_obj_get_style_text_align(volume, LV_PART_MAIN) != LV_TEXT_ALIGN_LEFT ||
+                lv_obj_get_style_text_align(brightness, LV_PART_MAIN) != LV_TEXT_ALIGN_LEFT ||
+                lv_obj_get_x(volume) != lv_obj_get_x(firmware) ||
+                lv_obj_get_x(brightness) != lv_obj_get_x(firmware))
+                return 99;
+            lv_obj_t* slider = nullptr;
+            for (unsigned i = 0; i < lv_obj_get_child_count(tail); ++i) {
+                auto* child = lv_obj_get_child(tail, i);
+                if (lv_obj_check_type(child, &lv_slider_class))
+                    slider = child;
+            }
+            if (!slider)
+                return 94;
+            lv_obj_scroll_to_y(content, 350, LV_ANIM_OFF);
+            lv_obj_update_layout(lv_screen_active());
+            lv_area_t area{};
+            lv_obj_get_coords(slider, &area);
+            lv_area_t click_area{};
+            lv_obj_get_click_area(slider, &click_area);
+            if (lv_area_get_height(&area) != 32 || lv_area_get_height(&click_area) < 56)
+                return 100;
+            const int ys[] = {area.y1 - 10, area.y2 + 10};
+            for (int y : ys) {
+                sample(true, area.x2 - 10, y);
+                sample(true, area.x1 + 10, y);
+                sample(false, area.x1 + 10, y);
+                if (rc::Board::level > 20 || rc::Board::saved_brightness != rc::Board::level)
+                    return 101;
+                sample(true, area.x1 + 10, y);
+                sample(true, area.x2 - 10, y);
+                sample(false, area.x2 - 10, y);
+                if (rc::Board::level < 85 || rc::Board::saved_brightness != rc::Board::level ||
+                    rc::Board::applied_brightness != rc::Board::level)
+                    return 95;
+            }
+            state.view.power = rc::DisplayPower::Dim;
+            advance_timers(32);
+            if (rc::Board::applied_brightness != 15)
+                return 96;
+            state.view.power = rc::DisplayPower::Off;
+            advance_timers(32);
+            if (rc::Board::applied_brightness != 0)
+                return 97;
+            state.view.power = rc::DisplayPower::Active;
+            advance_timers(32);
+            if (rc::Board::applied_brightness != rc::Board::level)
+                return 98;
+        } else if (scenario == "hint-fade") {
             state.view.notice = rc::Notice::CommandSent;
             advance_timers(32);
             auto* hint = find_label(lv_screen_active(), rc::text::sent);
@@ -261,7 +404,7 @@ int main(int argc, char** argv) {
                 lv_image_get_scale_x(images[1]) != lv_image_get_scale_y(images[1]) ||
                 lv_obj_get_width(photo) != 260 || lv_obj_get_height(photo) != 260 ||
                 photo_area.y2 >= status_area.y1 - 3 || status_area.y2 + 3 >= 466 ||
-                !lv_obj_has_flag(images[0], LV_OBJ_FLAG_CLICKABLE) ||
+                lv_obj_has_flag(images[0], LV_OBJ_FLAG_CLICKABLE) ||
                 find_label(shoot, rc::text::status_title))
                 return 61;
             // The supplied model image and the former status position must not accept camera input.
@@ -287,8 +430,7 @@ int main(int argc, char** argv) {
             if (!find_label(shoot, rc::text::holding))
                 return 65;
         } else if (status_input) {
-            auto* shoot =
-                lv_obj_get_parent(find_photo(lv_screen_active()));
+            auto* shoot = lv_obj_get_parent(find_photo(lv_screen_active()));
             auto* status = find_label(shoot, rc::text::ready);
             if (!status || !lv_obj_is_visible(status) ||
                 !lv_color_eq(lv_obj_get_style_text_color(status, LV_PART_MAIN), lv_color_hex(0x8bc5a1)))
@@ -301,10 +443,10 @@ int main(int argc, char** argv) {
             };
             if (!static_status())
                 return 41;
-            tap(233, 420); // Connected status must not start another connection.
+            swipe(233, 420, 233, 360); // Connected status must not start another connection.
             if (std::count(rc::actions.begin(), rc::actions.end(), rc::Action::Connect))
                 return 42;
-            tap(233, 55);
+            swipe(233, 40, 233, 100);
             tap(233, 426);
             if (!lv_obj_is_visible(status) || !static_status())
                 return 43;
@@ -317,6 +459,12 @@ int main(int argc, char** argv) {
                 !static_status())
                 return 44;
             tap(233, 420);
+            if (std::count(rc::actions.begin(), rc::actions.end(), rc::Action::Connect))
+                return 45;
+            sample(true, 233, 420);
+            sample(true, 233, 365); // Exactly at the threshold.
+            sample(true, 233, 350);
+            sample(false, 233, 350);
             if (std::count(rc::actions.begin(), rc::actions.end(), rc::Action::Connect) != 1)
                 return 45;
             state.view.connection = rc::ConnectionState::Preparing;
@@ -603,11 +751,39 @@ int main(int argc, char** argv) {
             if (find_progress_arc(lv_screen_active()) || lv_anim_count_running() != 0 ||
                 std::count(rc::actions.begin(), rc::actions.end(), rc::Action::Disconnect) != 1)
                 return 16;
+            swipe(233, 420, 233, 360);
+            if (!find_progress_arc(lv_screen_active()))
+                return 20;
         } else if (navigation_input) {
-            auto* shoot =
-                lv_obj_get_parent(find_photo(lv_screen_active()));
+            auto* shoot = lv_obj_get_parent(find_photo(lv_screen_active()));
             auto* info =
                 lv_obj_get_parent(lv_obj_get_parent(find_label(lv_screen_active(), rc::text::battery)));
+            if (scenario == "edge-gestures") {
+                tap(233, 55);
+                tap(233, 420);
+                swipe(233, 40, 233, 94); // Below threshold.
+                swipe(233, 80, 233, 20); // Wrong direction.
+                swipe(233, 420, 233, 450);
+                swipe(233, 420, 293, 365); // Horizontal dominates.
+                swipe(80, 104, 80, 164); // Outside the top edge region.
+                if (!lv_obj_is_visible(shoot) || lv_obj_is_visible(info) ||
+                    std::count(rc::actions.begin(), rc::actions.end(), rc::Action::Connect) ||
+                    std::count(rc::actions.begin(), rc::actions.end(), rc::Action::PhotoDown) ||
+                    rc::Board::shutter_sounds)
+                    return 102;
+                // Wake-only and failed touches must not navigate.
+                state.view.power = rc::DisplayPower::Off;
+                advance_timers(32);
+                swipe(233, 40, 233, 100);
+                state.view.power = rc::DisplayPower::Active;
+                advance_timers(32);
+                sample(true, 233, 40);
+                sample(false, 0, 0, true);
+                sample(true, 233, 100);
+                sample(false, 233, 100);
+                if (!lv_obj_is_visible(shoot) || lv_obj_is_visible(info))
+                    return 103;
+            }
             if (scenario == "no-swipe-navigation") {
                 sample(true, 90, 233);
                 sample(true, 170, 233);
@@ -622,7 +798,7 @@ int main(int argc, char** argv) {
                 if (!lv_obj_is_visible(shoot) || lv_obj_is_visible(info))
                     return 7;
             }
-            tap(233, 55);
+            swipe(233, 40, 233, 95);
             if (lv_obj_is_visible(shoot) || !lv_obj_is_visible(info))
                 return 8;
             auto* content = lv_obj_get_parent(find_label(info, rc::text::battery));
@@ -706,6 +882,8 @@ int main(int argc, char** argv) {
                                 : scenario == "blocked-status-tap" ? 420
                                                                    : 210;
             sample(true, 233, start_y);
+            if (scenario == "blocked-status-tap")
+                sample(true, 233, 360);
             if (scenario == "swipe-cancel")
                 sample(true, 310, 210);
             if (scenario == "touch-error" || scenario == "touch-error-recover")

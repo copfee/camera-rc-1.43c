@@ -1,5 +1,5 @@
 idf_component_register(SRCS "src/board.cpp" "src/display_sync.cpp" "src/shutter_audio.cpp" INCLUDE_DIRS "include"
-    REQUIRES esp_driver_gpio esp_driver_spi esp_driver_i2c esp_driver_i2s esp_lcd esp_adc esp_timer
+    REQUIRES esp_driver_gpio esp_driver_spi esp_driver_i2c esp_driver_i2s esp_lcd esp_adc esp_timer nvs_flash
         lvgl espressif__esp_lcd_sh8601 espressif__esp_codec_dev)
 
 

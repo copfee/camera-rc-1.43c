@@ -134,13 +134,17 @@ int main() {
         FakeCamera f;
         Controller c(f);
         ready(c);
-        c.tick(30002);
-        CHECK(c.view().power == DisplayPower::Dim);
+        c.tick(60000);
+        CHECK(c.view().power == DisplayPower::Active);
         c.tick(60002);
-        CHECK(c.touch_wake(60003));
-        CHECK(!c.touch_wake(60004));
-        c.tick(120004);
-        c.photo_down(InputSource::Boot, 120005);
+        CHECK(c.view().power == DisplayPower::Dim);
+        c.tick(120000);
+        CHECK(c.view().power == DisplayPower::Dim);
+        c.tick(120002);
+        CHECK(c.touch_wake(120003));
+        CHECK(!c.touch_wake(120004));
+        c.tick(240004);
+        c.photo_down(InputSource::Boot, 240005);
         CHECK(c.view().power == DisplayPower::Active);
     }
     {

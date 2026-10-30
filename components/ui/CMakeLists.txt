@@ -1,4 +1,4 @@
-idf_component_register(SRCS "src/ui.cpp" "src/font_20.c" "src/font_24.c" "src/fujifilm_logo.c" "src/xe5_logo.c" "src/shutter_idle.c" "src/shutter_pressed.c" INCLUDE_DIRS "include"
+idf_component_register(SRCS "src/ui.cpp" "src/font_20.c" "src/font_24.c" "src/fujifilm_logo.c" "src/xe5_logo.c" "src/shutter_idle.c" "src/shutter_pressed.c" "src/shutter_idle_full.c" "src/shutter_pressed_full.c" INCLUDE_DIRS "include"
     REQUIRES app_runtime board lvgl)
 
 

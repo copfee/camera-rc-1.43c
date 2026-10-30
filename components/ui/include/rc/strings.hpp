@@ -2,6 +2,15 @@
 namespace rc::text {
 inline constexpr auto return_shoot = "返回拍摄";
 inline constexpr auto status_title = "设备状态";
+inline constexpr auto volume = "音量";
+inline constexpr auto fullscreen = "全屏";
+inline constexpr auto fullscreen_on = "ON";
+inline constexpr auto fullscreen_off = "OFF";
+inline constexpr auto brightness = "屏幕亮度";
+inline constexpr auto volume_off = "关";
+inline constexpr auto volume_low = "低";
+inline constexpr auto volume_medium = "中";
+inline constexpr auto volume_high = "高";
 inline constexpr auto battery = "本机电量";
 inline constexpr auto charging = "正在充电";
 inline constexpr auto not_charging = "未在充电";

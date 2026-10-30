@@ -71,7 +71,7 @@ bool ShutterAudio::init(i2c_master_bus_handle_t bus) {
         sample.channel = 2;
         sample.bits_per_sample = 16;
         if (esp_codec_dev_open(device_, &sample) != ESP_CODEC_DEV_OK ||
-            esp_codec_dev_set_out_vol(device_, 55) != ESP_CODEC_DEV_OK)
+            esp_codec_dev_set_out_vol(device_, kShutterVolumeLevels[1]) != ESP_CODEC_DEV_OK)
             goto failed;
     }
     if (xTaskCreate(worker, "shutter_audio", 4096, this, 3, &task_) != pdPASS)
@@ -126,6 +126,16 @@ void ShutterAudio::worker(void* argument) {
     std::array<int16_t, kChunkFrames * 2> pcm{};
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        const auto volume = audio.volume_.load();
+        if (volume == 0) {
+            audio.busy_.store(false);
+            continue;
+        }
+        if (esp_codec_dev_set_out_vol(audio.device_, volume) != ESP_CODEC_DEV_OK) {
+            ESP_LOGW(kTag, "设置音量失败");
+            audio.busy_.store(false);
+            continue;
+        }
         gpio_set_level(kAmplifier, 1);
         vTaskDelay(pdMS_TO_TICKS(5));
         bool played = true;

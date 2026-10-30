@@ -15,6 +15,8 @@ LV_IMAGE_DECLARE(rc_fujifilm_logo);
 LV_IMAGE_DECLARE(rc_xe5_logo);
 LV_IMAGE_DECLARE(rc_shutter_idle);
 LV_IMAGE_DECLARE(rc_shutter_pressed);
+LV_IMAGE_DECLARE(rc_shutter_idle_full);
+LV_IMAGE_DECLARE(rc_shutter_pressed_full);
 }
 
 namespace rc {
@@ -177,17 +179,19 @@ class RoundUI {
 
   private:
     Board& board_;
-    lv_obj_t *root_{}, *shoot_{}, *info_{}, *photo_{}, *status_{}, *hint_{};
+    lv_obj_t *root_{}, *shoot_{}, *info_{}, *photo_{}, *status_{}, *hint_{}, *logo_{}, *model_logo_{};
     lv_obj_t *percent_{}, *voltage_{}, *charge_{}, *link_{}, *signal_{}, *connect_{};
     lv_obj_t *camera_name_{}, *address_{}, *address_caption_{}, *device_tail_{};
-    lv_obj_t *connect_label_{}, *modal_{}, *repair_{};
+    lv_obj_t *connect_label_{}, *modal_{}, *repair_{}, *brightness_slider_{}, *brightness_value_{};
+    std::array<lv_obj_t*, 4> volume_buttons_{};
+    std::array<lv_obj_t*, 2> fullscreen_buttons_{};
     lv_obj_t *modal_title_{}, *progress_arc_{}, *progress_stage_{};
     lv_timer_t* progress_timer_{};
     uint32_t progress_started_{};
     lv_indev_t* input_{};
     Snapshot state_{};
     bool info_visible_{false}, gesture_down_{false}, swallow_{false}, cancelled_{false};
-    bool photo_command_down_{false};
+    bool photo_command_down_{false}, slider_gesture_{false}, outside_fullscreen_touch_{false};
     int start_x_{0}, start_y_{0};
     DisplayPower power_{DisplayPower::Active};
     uint64_t next_update_{0};
@@ -227,20 +231,43 @@ class RoundUI {
                 ui.cancelled_ = false;
                 ui.start_x_ = sample.x;
                 ui.start_y_ = sample.y;
+                const int cx = sample.x - 233, cy = sample.y - 233;
+                ui.outside_fullscreen_touch_ = !ui.info_visible_ && !ui.modal_ && ui.board_.fullscreen() &&
+                    (sample.y < 104 || sample.y >= 364 || cx * cx + cy * cy >= 233 * 233);
+                ui.slider_gesture_ = false;
+                if (ui.info_visible_ && !ui.modal_ && ui.brightness_slider_ &&
+                    lv_obj_is_visible(ui.brightness_slider_)) {
+                    lv_area_t area{};
+                    lv_obj_get_click_area(ui.brightness_slider_, &area);
+                    ui.slider_gesture_ = sample.x >= area.x1 && sample.x <= area.x2 && sample.y >= area.y1 &&
+                                         sample.y <= area.y2;
+                }
                 ui.swallow_ = ui.swallow_ || ui.state_.view.power == DisplayPower::Off;
                 post(Action::Activity);
             }
             const int dx = sample.x - ui.start_x_, dy = sample.y - ui.start_y_;
-            if (!ui.swallow_ && !ui.cancelled_ && std::abs(dx) >= kSwipe && std::abs(dx) > std::abs(dy)) {
+            if (!ui.info_visible_ && !ui.modal_ && !ui.swallow_ && !ui.cancelled_ &&
+                std::abs(dy) >= kSwipe && std::abs(dy) > std::abs(dx) &&
+                ((ui.start_y_ < 104 && dy > 0) || (ui.start_y_ >= 364 && dy < 0))) {
+                post(Action::Cancel);
+                ui.cancelled_ = true;
+                lv_indev_wait_release(input);
+                if (ui.start_y_ < 104)
+                    ui.show_page(true);
+                else
+                    ui.open_connection();
+            }
+            if (!ui.slider_gesture_ && !ui.swallow_ && !ui.cancelled_ && std::abs(dx) >= kSwipe &&
+                std::abs(dx) > std::abs(dy)) {
                 post(Action::Cancel);
                 ui.cancelled_ = true;
                 // Horizontal drags cancel held input without navigating or clicking.
                 lv_indev_wait_release(input);
             }
-            if (!ui.swallow_ && !ui.cancelled_)
+            if (!ui.swallow_ && !ui.cancelled_ && !ui.outside_fullscreen_touch_)
                 data->state = LV_INDEV_STATE_PRESSED;
         } else {
-            ui.gesture_down_ = ui.swallow_ = ui.cancelled_ = false;
+            ui.gesture_down_ = ui.swallow_ = ui.cancelled_ = ui.outside_fullscreen_touch_ = false;
         }
     }
 
@@ -274,18 +301,77 @@ class RoundUI {
                c == ConnectionState::Pairing || c == ConnectionState::Reconnecting ||
                c == ConnectionState::Preparing;
     }
-    static void status_event(lv_event_t* e) {
-        auto& ui = self(e);
-        if (ui.state_.view.connection == ConnectionState::ProtocolBlocked)
-            ui.dialog(text::protocol_title, text::protocol_details, false);
-        else if (ui.state_.view.connection == ConnectionState::Ready)
+    void open_connection() {
+        if (state_.view.connection == ConnectionState::ProtocolBlocked)
+            dialog(text::protocol_title, text::protocol_details, false);
+        else if (state_.view.connection == ConnectionState::Ready)
             return;
-        else if (ui.state_.link.stage != LinkStage::Idle && ui.state_.link.stage != LinkStage::Failed)
-            ui.connection_overlay();
+        else if (state_.link.stage != LinkStage::Idle && state_.link.stage != LinkStage::Failed)
+            connection_overlay();
         else
             post(Action::Connect);
     }
-    static void info_event(lv_event_t* e) { self(e).show_page(true); }
+    void refresh_volume() {
+        for (unsigned i = 0; i < volume_buttons_.size(); ++i) {
+            const bool selected = i == board_.volume_level();
+            lv_obj_set_style_bg_color(volume_buttons_[i], lv_color_hex(selected ? kWhite : kBlack), 0);
+            lv_obj_set_style_text_color(lv_obj_get_child(volume_buttons_[i], 0),
+                                        lv_color_hex(selected ? kBlack : kWhite), 0);
+        }
+    }
+    static void volume_event(lv_event_t* e) {
+        auto& ui = self(e);
+        for (unsigned i = 0; i < ui.volume_buttons_.size(); ++i) {
+            if (lv_event_get_target_obj(e) == ui.volume_buttons_[i]) {
+                ui.board_.set_volume_level(i);
+                ui.refresh_volume();
+                break;
+            }
+        }
+    }
+    void apply_fullscreen() {
+        const bool enabled = board_.fullscreen();
+        for (auto* obj : {logo_, model_logo_, status_, hint_}) {
+            if (enabled)
+                lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+            else
+                lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
+        }
+        lv_imagebutton_set_src(photo_, LV_IMAGEBUTTON_STATE_RELEASED, nullptr,
+                               enabled ? &rc_shutter_idle_full : &rc_shutter_idle, nullptr);
+        lv_imagebutton_set_src(photo_, LV_IMAGEBUTTON_STATE_PRESSED, nullptr,
+                               enabled ? &rc_shutter_pressed_full : &rc_shutter_pressed, nullptr);
+        lv_obj_set_pos(photo_, enabled ? 0 : 103, enabled ? 0 : 104);
+        lv_obj_set_size(photo_, enabled ? 466 : 260, enabled ? 466 : 260);
+        for (unsigned i = 0; i < fullscreen_buttons_.size(); ++i) {
+            const bool selected = enabled == (i == 1);
+            lv_obj_set_style_bg_color(fullscreen_buttons_[i], lv_color_hex(selected ? kWhite : kBlack), 0);
+            lv_obj_set_style_text_color(lv_obj_get_child(fullscreen_buttons_[i], 0),
+                                        lv_color_hex(selected ? kBlack : kWhite), 0);
+        }
+    }
+    static void fullscreen_event(lv_event_t* e) {
+        auto& ui = self(e);
+        const bool enabled = lv_event_get_target_obj(e) == ui.fullscreen_buttons_[1];
+        if (enabled != ui.board_.fullscreen()) {
+            ui.board_.set_fullscreen(enabled);
+            ui.apply_fullscreen();
+        }
+    }
+    void apply_brightness() {
+        board_.brightness(power_ == DisplayPower::Off   ? 0
+                          : power_ == DisplayPower::Dim ? std::min(15U, board_.display_brightness())
+                                                        : board_.display_brightness());
+    }
+    static void brightness_event(lv_event_t* e) {
+        auto& ui = self(e);
+        const auto value = static_cast<unsigned>(lv_slider_get_value(ui.brightness_slider_));
+        ui.board_.set_display_brightness(value, lv_event_get_code(e) == LV_EVENT_RELEASED);
+        char caption[8];
+        std::snprintf(caption, sizeof(caption), "%u%%", value);
+        lv_label_set_text(ui.brightness_value_, caption);
+        ui.apply_brightness();
+    }
     static void shoot_event(lv_event_t* e) { self(e).show_page(false); }
     static void connect_event(lv_event_t* e) {
         auto& ui = self(e);
@@ -488,20 +574,18 @@ class RoundUI {
         lv_obj_set_style_clip_corner(root_, true, 0);
         lv_obj_remove_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
         shoot_ = box(root_, 0, 0, 466, 466);
-        auto* logo = lv_image_create(shoot_);
+        logo_ = lv_image_create(shoot_);
+        auto* logo = logo_;
         lv_image_set_src(logo, &rc_fujifilm_logo);
         lv_obj_set_pos(logo, 135, 22);
-        lv_obj_add_flag(logo, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_ext_click_area(logo, 5);
-        lv_obj_add_event_cb(logo, info_event, LV_EVENT_CLICKED, this);
-        auto* model_logo = lv_image_create(shoot_);
+        lv_obj_remove_flag(logo, LV_OBJ_FLAG_CLICKABLE);
+        model_logo_ = lv_image_create(shoot_);
+        auto* model_logo = model_logo_;
         lv_image_set_src(model_logo, &rc_xe5_logo);
         lv_obj_set_pos(model_logo, 183, 73);
         lv_obj_remove_flag(model_logo, LV_OBJ_FLAG_CLICKABLE);
         status_ = label(shoot_, text::unpaired, 93, 420, 280, &rc_font_24, kMuted);
-        lv_obj_add_flag(status_, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_ext_click_area(status_, 3);
-        lv_obj_add_event_cb(status_, status_event, LV_EVENT_CLICKED, this);
+        lv_obj_remove_flag(status_, LV_OBJ_FLAG_CLICKABLE);
         photo_ = lv_imagebutton_create(shoot_);
         lv_obj_set_pos(photo_, 103, 104);
         lv_obj_set_size(photo_, 260, 260);
@@ -522,13 +606,43 @@ class RoundUI {
         link_ = row(content, text::connection, text::unpaired, 137);
         signal_ = row(content, text::signal, text::unknown, 187);
         camera_name_ = row(content, text::bluetooth_name, text::unpaired, 237);
-        device_tail_ = box(content, 0, 287, 298, 275);
+        device_tail_ = box(content, 0, 287, 298, 597);
         address_ = row(device_tail_, text::bluetooth_address, text::unpaired, 0, &address_caption_);
         row(device_tail_, text::firmware, "0.2.0", 50);
-        connect_ = action_button(device_tail_, text::connect, 0, 111, 142, false, connect_event);
+        auto* volume_title = label(device_tail_, text::volume, 2, 110, 100, &rc_font_20, kMuted);
+        lv_obj_set_style_text_align(volume_title, LV_TEXT_ALIGN_LEFT, 0);
+        const char* captions[] = {text::volume_off, text::volume_low, text::volume_medium, text::volume_high};
+        for (unsigned i = 0; i < volume_buttons_.size(); ++i)
+            volume_buttons_[i] =
+                action_button(device_tail_, captions[i], i * 76, 140, 68, false, volume_event);
+        refresh_volume();
+        auto* brightness_title = label(device_tail_, text::brightness, 2, 215, 140, &rc_font_20, kMuted);
+        lv_obj_set_style_text_align(brightness_title, LV_TEXT_ALIGN_LEFT, 0);
+        brightness_value_ = label(device_tail_, "", 218, 215, 80);
+        brightness_slider_ = lv_slider_create(device_tail_);
+        lv_obj_set_pos(brightness_slider_, 18, 261);
+        lv_obj_set_size(brightness_slider_, 262, 32);
+        lv_obj_set_ext_click_area(brightness_slider_, 12);
+        lv_slider_set_range(brightness_slider_, 10, 100);
+        lv_slider_set_value(brightness_slider_, board_.display_brightness(), LV_ANIM_OFF);
+        char brightness_caption[8];
+        std::snprintf(brightness_caption, sizeof(brightness_caption), "%u%%", board_.display_brightness());
+        lv_label_set_text(brightness_value_, brightness_caption);
+        lv_obj_add_event_cb(brightness_slider_, brightness_event, LV_EVENT_VALUE_CHANGED, this);
+        lv_obj_add_event_cb(brightness_slider_, brightness_event, LV_EVENT_RELEASED, this);
+        auto* fullscreen_title = label(device_tail_, text::fullscreen, 2, 310, 100, &rc_font_20, kMuted);
+        lv_obj_set_style_text_align(fullscreen_title, LV_TEXT_ALIGN_LEFT, 0);
+        fullscreen_buttons_[0] =
+            action_button(device_tail_, text::fullscreen_off, 0, 340, 142, false, fullscreen_event);
+        fullscreen_buttons_[1] =
+            action_button(device_tail_, text::fullscreen_on, 156, 340, 142, false, fullscreen_event);
+        apply_fullscreen();
+        auto* separator = box(device_tail_, 0, 415, 298, 1, 0x292929);
+        lv_obj_remove_flag(separator, LV_OBJ_FLAG_CLICKABLE);
+        connect_ = action_button(device_tail_, text::connect, 0, 433, 142, false, connect_event);
         connect_label_ = lv_obj_get_child(connect_, 0);
-        repair_ = action_button(device_tail_, text::repair, 156, 111, 142, false, repair_event);
-        auto* trademark = label(device_tail_, text::trademark, 2, 187, 294, &rc_font_20, kMuted);
+        repair_ = action_button(device_tail_, text::repair, 156, 433, 142, false, repair_event);
+        auto* trademark = label(device_tail_, text::trademark, 2, 509, 294, &rc_font_20, kMuted);
         lv_label_set_long_mode(trademark, LV_LABEL_LONG_WRAP);
         page_link(info_, text::return_shoot, shoot_event);
         lv_obj_add_flag(info_, LV_OBJ_FLAG_HIDDEN);
@@ -551,7 +665,7 @@ class RoundUI {
         state_ = snapshot();
         if (state_.view.power != power_) {
             power_ = state_.view.power;
-            board_.brightness(power_ == DisplayPower::Off ? 0 : power_ == DisplayPower::Dim ? 15 : 70);
+            apply_brightness();
         }
         // Keep the dimmed shutter touchable for local audio, without camera commands.
         const lv_opa_t photo_opacity = state_.view.can_photo ? LV_OPA_COVER : LV_OPA_40;
@@ -571,9 +685,12 @@ class RoundUI {
             hint_started_ = now;
         }
         const auto hint_elapsed = now - hint_started_;
-        const lv_opa_t hint_opacity = hint_elapsed <= kHintVisibleMs ? static_cast<lv_opa_t>(LV_OPA_COVER)
-            : hint_elapsed >= kHintVisibleMs + kHintFadeMs ? static_cast<lv_opa_t>(LV_OPA_TRANSP)
-            : static_cast<lv_opa_t>((kHintVisibleMs + kHintFadeMs - hint_elapsed) * LV_OPA_COVER / kHintFadeMs);
+        const lv_opa_t hint_opacity =
+            hint_elapsed <= kHintVisibleMs ? static_cast<lv_opa_t>(LV_OPA_COVER)
+            : hint_elapsed >= kHintVisibleMs + kHintFadeMs
+                ? static_cast<lv_opa_t>(LV_OPA_TRANSP)
+                : static_cast<lv_opa_t>((kHintVisibleMs + kHintFadeMs - hint_elapsed) * LV_OPA_COVER /
+                                        kHintFadeMs);
         if (lv_obj_get_style_opa(hint_, LV_PART_MAIN) != hint_opacity)
             lv_obj_set_style_opa(hint_, hint_opacity, 0);
         set_text(link_, connection_text(connection));

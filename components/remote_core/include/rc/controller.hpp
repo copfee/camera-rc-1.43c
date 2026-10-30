@@ -3,8 +3,8 @@
 #include <optional>
 namespace rc {
 struct Timing {
-    Millis focus_ms{300}, pulse_ms{100}, long_press_ms{500}, pairing_ms{120000}, dim_ms{30000},
-        blank_ms{60000};
+    Millis focus_ms{300}, pulse_ms{100}, long_press_ms{500}, pairing_ms{120000}, dim_ms{60000},
+        blank_ms{120000};
 };
 enum class CapturePhase { Idle, Focusing, ShotPending, Holding, PhotoPulse, Releasing };
 enum class Notice {

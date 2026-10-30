@@ -10,6 +10,8 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs.h"
+#include "rc/audio_levels.hpp"
 #include <algorithm>
 
 namespace rc {
@@ -53,14 +55,17 @@ void Board::init() {
     gpio_set_level(GPIO_NUM_46, 0);
     vTaskDelay(pdMS_TO_TICKS(20));
     ESP_LOGI(kTag, "GPIO 已就绪：BOOT=0 充电检测=7；共享 I2C 音频芯片电源已开启（18），功放已关闭（46）");
+    load_settings();
     init_touch();
-    audio_.init(bus_); // Optional feedback failure must not prevent display or input startup.
+    audio_.init(bus_);
+    audio_.volume(kShutterVolumeLevels[volume_level_]); // Optional feedback failure must not prevent display
+                                                        // or input startup.
     ESP_LOGI(kTag, "初始化电池 ADC");
     init_battery();
     lv_init();
     lv_tick_set_cb(tick_ms);
     init_panel();
-    brightness(70);
+    brightness(display_brightness_);
     ESP_LOGI(kTag, "板卡初始化完成");
 }
 
@@ -145,6 +150,62 @@ void Board::flush_wait(lv_display_t* display) {
 bool Board::transfer_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t*, void* context) {
     auto* board = static_cast<Board*>(context);
     return board->display_sync_.transfer_done_from_isr();
+}
+
+void Board::load_settings() {
+    nvs_handle_t handle{};
+    const auto opened = nvs_open("device_settings", NVS_READONLY, &handle);
+    if (opened != ESP_OK) {
+        ESP_LOGW(kTag, "设备设置读取失败，使用默认值：%s", esp_err_to_name(opened));
+        return;
+    }
+    uint8_t value = 0;
+    auto result = nvs_get_u8(handle, "volume", &value);
+    if (result == ESP_OK && value <= 3)
+        volume_level_ = value;
+    else
+        ESP_LOGW(kTag, "音量设置缺失或无效，使用默认值");
+    result = nvs_get_u8(handle, "brightness", &value);
+    if (result == ESP_OK && value >= 10 && value <= 100)
+        display_brightness_ = value;
+    else
+        ESP_LOGW(kTag, "亮度设置缺失或无效，使用默认值");
+    result = nvs_get_u8(handle, "fullscreen", &value);
+    if (result == ESP_OK && value <= 1)
+        fullscreen_ = value != 0;
+    nvs_close(handle);
+}
+
+void Board::save_setting(const char* key, unsigned value) {
+    nvs_handle_t handle{};
+    auto result = nvs_open("device_settings", NVS_READWRITE, &handle);
+    if (result == ESP_OK) {
+        result = nvs_set_u8(handle, key, static_cast<uint8_t>(value));
+        if (result == ESP_OK)
+            result = nvs_commit(handle);
+        nvs_close(handle);
+    }
+    if (result != ESP_OK)
+        ESP_LOGW(kTag, "保存设备设置失败：%s", esp_err_to_name(result));
+}
+
+void Board::set_fullscreen(bool enabled) {
+    fullscreen_ = enabled;
+    save_setting("fullscreen", enabled ? 1 : 0);
+}
+
+void Board::set_volume_level(unsigned level) {
+    if (level >= kShutterVolumeLevels.size())
+        return;
+    volume_level_ = level;
+    audio_.volume(kShutterVolumeLevels[level]);
+    save_setting("volume", level);
+}
+
+void Board::set_display_brightness(unsigned percent, bool save) {
+    display_brightness_ = std::max(10U, std::min(percent, 100U));
+    if (save)
+        save_setting("brightness", display_brightness_);
 }
 
 void Board::brightness(unsigned percent) {

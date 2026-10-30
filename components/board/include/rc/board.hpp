@@ -29,10 +29,18 @@ class Board {
     BatterySample battery();
     bool boot_pressed() const;
     void brightness(unsigned percent);
+    unsigned volume_level() const { return volume_level_; }
+    unsigned display_brightness() const { return display_brightness_; }
+    bool fullscreen() const { return fullscreen_; }
+    void set_fullscreen(bool enabled);
+    void set_volume_level(unsigned level);
+    void set_display_brightness(unsigned percent, bool save);
     void shutter_sound() { audio_.play(); }
     static uint64_t milliseconds();
 
   private:
+    void load_settings();
+    void save_setting(const char* key, unsigned value);
     void init_panel();
     void init_touch();
     void init_battery();
@@ -46,6 +54,8 @@ class Board {
     i2c_master_dev_handle_t touch_{nullptr};
     adc_oneshot_unit_handle_t adc_{nullptr};
     adc_cali_handle_t calibration_{nullptr};
+    unsigned volume_level_{1}, display_brightness_{70};
+    bool fullscreen_{false};
     ShutterAudio audio_;
     DisplaySync display_sync_;
 };

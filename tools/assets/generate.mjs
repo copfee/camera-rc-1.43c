@@ -55,4 +55,6 @@ for (const [state, expected] of [
   const image = PNG.sync.read(new Resvg(svg).render().asPng());
   writeResource(image, `shutter_${state}`, checksum);
   console.log(`Shutter ${state} 260x260; source SHA-256: ${checksum}`);
+  const fullSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="466" height="466" viewBox="60 30 1150 1150"><image width="1271" height="1238" href="data:image/png;base64,${source.toString('base64')}"/></svg>`;
+  writeResource(PNG.sync.read(new Resvg(fullSvg).render().asPng()), `shutter_${state}_full`, checksum);
 }

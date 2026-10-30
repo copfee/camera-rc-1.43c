@@ -18,7 +18,19 @@ class Board {
     inline static unsigned shutter_sounds{0};
     void shutter_sound() { ++shutter_sounds; }
     TouchSample touch() { return sample; }
-    void brightness(unsigned) {}
+    inline static unsigned volume{1}, level{70}, applied_brightness{70}, saved_brightness{70};
+    inline static bool fullscreen_value{false};
+    bool fullscreen() const { return fullscreen_value; }
+    void set_fullscreen(bool enabled) { fullscreen_value = enabled; }
+    unsigned volume_level() const { return volume; }
+    unsigned display_brightness() const { return level; }
+    void set_volume_level(unsigned value) { volume = value; }
+    void set_display_brightness(unsigned value, bool save) {
+        level = value;
+        if (save)
+            saved_brightness = value;
+    }
+    void brightness(unsigned value) { applied_brightness = value; }
     static uint64_t milliseconds() { return 1000 + lv_tick_get(); }
 };
 } // namespace rc
