@@ -142,7 +142,7 @@ def host_tests():
     run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"])
 
 
-def preview(source):
+def preview(source, shutter_style="model"):
     source = Path(source or ROOT / ".tools/lvgl-preview").resolve()
     if not (source / "lvgl.h").is_file():
         raise RuntimeError("请先检出 LVGL v9.4.0 到 .tools/lvgl-preview，或用 --lvgl-source 指定；详见 docs/design/README.md。")
@@ -150,7 +150,7 @@ def preview(source):
     if not all(f"#define LVGL_VERSION_{key} {value}" in version for key, value in (("MAJOR", 9), ("MINOR", 4), ("PATCH", 0))):
         raise RuntimeError("原生预览必须使用 LVGL 9.4.0。")
     build = ROOT / "build-preview"
-    run(["cmake", "-S", ROOT, "-B", build, "-DRC_HOST_BUILD=ON", "-DRC_UI_PREVIEW=ON", f"-DLVGL_SOURCE_DIR={source}"])
+    run(["cmake", "-S", ROOT, "-B", build, "-DRC_HOST_BUILD=ON", "-DRC_UI_PREVIEW=ON", f"-DLVGL_SOURCE_DIR={source}", f"-DRC_SHUTTER_STYLE={shutter_style}"])
     run(["cmake", "--build", build, "--config", "Debug", "--parallel", "8"])
     run(["ctest", "--test-dir", build, "-C", "Debug", "--output-on-failure"])
     binary = build / "tests/preview/ui_preview"
@@ -181,6 +181,7 @@ def main():
     parser.add_argument("command", choices=["doctor", "setup", "build", "flash", "monitor", "erase", "test", "preview", "format-check", "package"])
     parser.add_argument("--port")
     parser.add_argument("--lvgl-source")
+    parser.add_argument("--shutter-style", choices=["model", "dragon"], default="model", help="预览的快门按钮款式")
     parser.add_argument("--confirm-erase", action="store_true", help="确认清除全部 Flash，包括配对记录")
     options = parser.parse_args()
     if options.command == "setup":
@@ -190,7 +191,7 @@ def main():
     elif options.command == "test":
         host_tests()
     elif options.command == "preview":
-        preview(options.lvgl_source)
+        preview(options.lvgl_source, options.shutter_style)
     elif options.command == "package":
         package()
     elif options.command == "format-check":

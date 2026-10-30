@@ -13,14 +13,18 @@ LV_FONT_DECLARE(rc_font_20);
 LV_FONT_DECLARE(rc_font_24);
 LV_IMAGE_DECLARE(rc_fujifilm_logo);
 LV_IMAGE_DECLARE(rc_xe5_logo);
-LV_IMAGE_DECLARE(rc_shutter_idle);
-LV_IMAGE_DECLARE(rc_shutter_pressed);
-LV_IMAGE_DECLARE(rc_shutter_idle_full);
-LV_IMAGE_DECLARE(rc_shutter_pressed_full);
+LV_IMAGE_DECLARE(RC_SHUTTER_IDLE);
+LV_IMAGE_DECLARE(RC_SHUTTER_PRESSED);
+LV_IMAGE_DECLARE(RC_SHUTTER_IDLE_FULL);
+LV_IMAGE_DECLARE(RC_SHUTTER_PRESSED_FULL);
 }
 
 namespace rc {
 namespace {
+constexpr const lv_image_dsc_t* kShutterIdle = &RC_SHUTTER_IDLE;
+constexpr const lv_image_dsc_t* kShutterPressed = &RC_SHUTTER_PRESSED;
+constexpr const lv_image_dsc_t* kShutterIdleFull = &RC_SHUTTER_IDLE_FULL;
+constexpr const lv_image_dsc_t* kShutterPressedFull = &RC_SHUTTER_PRESSED_FULL;
 constexpr uint32_t kBlack = 0x000000, kSilver = 0xbcb9b0, kWhite = 0xf0ece1, kMuted = 0x8f908d;
 constexpr uint32_t kGreen = 0x8bc5a1, kAmber = 0xd4ae76;
 constexpr int kSwipe = 55;
@@ -338,9 +342,9 @@ class RoundUI {
                 lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
         }
         lv_imagebutton_set_src(photo_, LV_IMAGEBUTTON_STATE_RELEASED, nullptr,
-                               enabled ? &rc_shutter_idle_full : &rc_shutter_idle, nullptr);
+                               enabled ? kShutterIdleFull : kShutterIdle, nullptr);
         lv_imagebutton_set_src(photo_, LV_IMAGEBUTTON_STATE_PRESSED, nullptr,
-                               enabled ? &rc_shutter_pressed_full : &rc_shutter_pressed, nullptr);
+                               enabled ? kShutterPressedFull : kShutterPressed, nullptr);
         lv_obj_set_pos(photo_, enabled ? 0 : 103, enabled ? 0 : 104);
         lv_obj_set_size(photo_, enabled ? 466 : 260, enabled ? 466 : 260);
         for (unsigned i = 0; i < fullscreen_buttons_.size(); ++i) {
@@ -589,8 +593,8 @@ class RoundUI {
         photo_ = lv_imagebutton_create(shoot_);
         lv_obj_set_pos(photo_, 103, 104);
         lv_obj_set_size(photo_, 260, 260);
-        lv_imagebutton_set_src(photo_, LV_IMAGEBUTTON_STATE_RELEASED, nullptr, &rc_shutter_idle, nullptr);
-        lv_imagebutton_set_src(photo_, LV_IMAGEBUTTON_STATE_PRESSED, nullptr, &rc_shutter_pressed, nullptr);
+        lv_imagebutton_set_src(photo_, LV_IMAGEBUTTON_STATE_RELEASED, nullptr, kShutterIdle, nullptr);
+        lv_imagebutton_set_src(photo_, LV_IMAGEBUTTON_STATE_PRESSED, nullptr, kShutterPressed, nullptr);
         lv_obj_add_event_cb(photo_, photo_event, LV_EVENT_ALL, this);
         hint_ = label(shoot_, "", 58, 384, 350, &rc_font_24, kMuted);
         info_ = box(root_, 0, 0, 466, 466);

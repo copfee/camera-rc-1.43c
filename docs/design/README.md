@@ -14,6 +14,8 @@ python tools/project.py preview --lvgl-source managed_components/lvgl__lvgl
 
 也可将 LVGL 检出至 `.tools/lvgl-preview`，然后省略 `--lvgl-source`。命令构建原生预览、运行输入和渲染测试，并更新 `rendered/`。模拟检查不包含硬件传输耗时或实屏帧率。
 
+快门按钮默认使用 FUJIFILM 标识版；预览龙头版时加入 `--shutter-style dragon`，重新预览标识版使用 `--shutter-style model`。固件在 ESP-IDF 环境执行 `idf.py menuconfig`，通过 `Camera remote UI → Shutter button style` 选择款式。已存在的 `sdkconfig` 保存其选择；要更改已有构建，请在 menuconfig 中重新选择。
+
 ## 资源生成
 
 中文文案修改后，使用固定 SHA-256 的 Noto Sans CJK SC 字体和锁定的 lv_font_conv 1.5.3 更新字库。字体放在 `.tools/fonts/NotoSansCJKsc-Regular.otf`，执行：
@@ -31,3 +33,5 @@ npm --prefix tools/assets run generate
 ```
 
 FUJIFILM 原稿及其 ImageGen 编辑图、X-E5 原稿和快门图片均保留以支持溯源与重新生成；商标和许可说明见[第三方声明](../../THIRD_PARTY_NOTICES.md)。普通固件构建使用已生成的 C 资源，不需要 Node.js。
+
+新增快门款式时，准备正常和按下两张匹配的源图，在生成脚本登记文件、哈希及裁切参数，生成两种尺寸的四个资源；同时扩展 Kconfig、固件 CMake 的选择、`tools/cmake/shutter_assets.cmake` 中的款式映射，并在预览命令中加入对应选项。UI 通过共用映射引用四种状态，每次构建只编入所选款式。

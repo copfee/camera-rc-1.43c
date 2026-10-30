@@ -1,0 +1,14 @@
+menu "Camera remote UI"
+
+choice RC_SHUTTER_STYLE
+    prompt "Shutter button style"
+    default RC_SHUTTER_STYLE_MODEL
+
+config RC_SHUTTER_STYLE_MODEL
+    bool "FUJIFILM"
+
+config RC_SHUTTER_STYLE_DRAGON
+    bool "Dragon"
+endchoice
+
+endmenu

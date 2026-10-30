@@ -44,22 +44,26 @@ writeResource(model, 'xe5_logo', modelChecksum);
 console.log(`X-E5 ${model.width}x${model.height}; source SHA-256: ${modelChecksum}`);
 
 // Matching ImageGen shutter states share one crop and output size.
-const idleSource = readFileSync(resolve(root, 'components/ui/assets/shutter_idle_source.png'));
-for (const [state, expected] of [
-  ['idle', '7a541d19935610ea7d02a3f0a74b2103d8f7ddf45bed94e7000d3f39d49dfddd'],
-  ['pressed', '044058c2b8634b83e258d7a9b8373af880b92dbcb709056c82f0003df03b6f20'],
+for (const [prefix, hashes] of [
+  ['shutter', ['7a541d19935610ea7d02a3f0a74b2103d8f7ddf45bed94e7000d3f39d49dfddd', '044058c2b8634b83e258d7a9b8373af880b92dbcb709056c82f0003df03b6f20']],
+  ['shutter_model', ['cf310e6f5712fc73fbfec1f1e52014b663da84a6c4791041ab0e7e4641a427f7', '842c138c68f69aacd49bbba595c48f59e03adc840099f31a0f9b94bfb7f726ec']],
 ]) {
-  const source = readFileSync(resolve(root, `components/ui/assets/shutter_${state}_source.png`));
+ const idleSource = readFileSync(resolve(root, `components/ui/assets/${prefix}_idle_source.png`));
+ const idleSize = PNG.sync.read(idleSource);
+ for (const [index, state] of ['idle', 'pressed'].entries()) {
+  const expected = hashes[index];
+  const source = readFileSync(resolve(root, `components/ui/assets/${prefix}_${state}_source.png`));
   const checksum = createHash('sha256').update(source).digest('hex');
   if (checksum !== expected) throw new Error(`Shutter ${state} source SHA-256 mismatch`);
   const {width: sourceWidth, height: sourceHeight} = PNG.sync.read(source);
   const imageTag = `<image width="${sourceWidth}" height="${sourceHeight}" href="data:image/png;base64,${source.toString('base64')}"/>`;
   // Keep the outer ring pixel-identical to idle; feather only the inner medallion edge.
-  const content = state === 'idle' ? imageTag : `<defs><radialGradient id="fade" gradientUnits="userSpaceOnUse" cx="635" cy="590" r="425"><stop offset="94%" stop-color="white"/><stop offset="100%" stop-color="black"/></radialGradient><mask id="inner" maskUnits="userSpaceOnUse" x="0" y="0" width="1271" height="1238"><rect width="1271" height="1238" fill="url(#fade)"/></mask></defs><image width="1271" height="1238" href="data:image/png;base64,${idleSource.toString('base64')}"/><g mask="url(#inner)">${imageTag}</g>`;
+  const content = state === 'idle' ? imageTag : `<defs><radialGradient id="fade" gradientUnits="userSpaceOnUse" cx="635" cy="590" r="425"><stop offset="94%" stop-color="white"/><stop offset="100%" stop-color="black"/></radialGradient><mask id="inner" maskUnits="userSpaceOnUse" x="0" y="0" width="${idleSize.width}" height="${idleSize.height}"><rect width="${idleSize.width}" height="${idleSize.height}" fill="url(#fade)"/></mask></defs><image width="${idleSize.width}" height="${idleSize.height}" href="data:image/png;base64,${idleSource.toString('base64')}"/><g mask="url(#inner)">${imageTag}</g>`;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="260" height="260" viewBox="60 30 1150 1150">${content}</svg>`;
   const image = PNG.sync.read(new Resvg(svg).render().asPng());
-  writeResource(image, `shutter_${state}`, checksum);
-  console.log(`Shutter ${state} 260x260; source SHA-256: ${checksum}`);
+  writeResource(image, `${prefix}_${state}`, checksum);
+  console.log(`${prefix} ${state} 260x260; source SHA-256: ${checksum}`);
   const fullSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="466" height="466" viewBox="60 30 1150 1150">${content}</svg>`;
-  writeResource(PNG.sync.read(new Resvg(fullSvg).render().asPng()), `shutter_${state}_full`, checksum);
+  writeResource(PNG.sync.read(new Resvg(fullSvg).render().asPng()), `${prefix}_${state}_full`, checksum);
+ }
 }
