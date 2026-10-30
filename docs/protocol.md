@@ -4,7 +4,7 @@
 
 本项目从手柄外设方案迁移到 furble 使用的富士手机遥控协议：遥控器主动扫描并连接相机，不再广播手柄服务，也不再使用 `00 00 XX` 手柄报文。
 
-协议依据是 [furble 固定提交 0cac22a](https://github.com/gkoh/furble/tree/0cac22aacc3d9ef250be40849118af78a5f39f27/lib/furble) 的 Fujifilm、FujifilmBasic、FujifilmSecure、Device 和 Camera 源码，许可见 `LICENSES/furble-MIT.txt`。生产代码可用的含义是有可追溯协议来源与运行时完整握手；**尚未在本项目的 X-E5 上验收**，不宣称拍摄、对焦或连拍已经实测成功。
+协议依据是 [furble 固定提交 0cac22a](https://github.com/gkoh/furble/tree/0cac22aacc3d9ef250be40849118af78a5f39f27/lib/furble) 的 Fujifilm、FujifilmBasic、FujifilmSecure、Device 和 Camera 源码，许可见 `LICENSES/furble-MIT.txt`。X-E5 原绑定的断电重连已有实机记录，但完整兼容性尚未验收；不宣称拍摄、对焦或连拍已经实测成功。详见[验证记录](verification.md)。
 
 ## 广播与握手
 

@@ -1,6 +1,6 @@
 # camera-rc · X-E5 圆屏遥控器
 
-基于 ESP-IDF 的富士相机蓝牙遥控器，适用于 **Waveshare ESP32-S3-Touch-AMOLED-1.43C**。支持单相机配对、开机自动连接、触摸或 BOOT 快门，以及圆屏设备状态显示。
+基于 ESP-IDF 的富士相机蓝牙遥控器，当前版本 **0.2.0**，适用于 **Waveshare ESP32-S3-Touch-AMOLED-1.43C**。支持单相机配对、开机自动连接、触摸或 BOOT 快门，以及圆屏设备状态显示。
 
 项目已实现富士 Basic／Secure 连接与拍照协议，并在本项目 X-E5 上验证了开发板重启后复用绑定自动连接。
 
@@ -30,9 +30,11 @@ cd C:\path\to\camera-rc-1.43c  # 替换为实际项目路径
 .\project.ps1 monitor --port COM5
 ```
 
-macOS 和 Linux 下使用 [project.sh](https://github.com/copfee/camera-rc-1.43c/blob/main/project.sh)，例如 `./project.sh build`。
+macOS 和 Linux 下使用 [project.sh](project.sh)，例如 `./project.sh build`；也可直接执行 `python tools/project.py` 加上述命令。
 
 需要 Git、Python 3.10–3.13、CMake 和 C++17 编译器。`setup` 可在工程内安装 SDK 和工具链；已有 SDK 时可通过 `IDF_PATH` 指定。普通刷写保留 NVS 和配对记录；完整擦除会删除配对记录，需显式使用 `erase --confirm-erase`。
+
+构建后运行 `./project.sh package`（Windows：`.\project.ps1 package`）可在 `dist/` 生成带校验清单的刷写包。开发时可运行 `format-check`，以及使用 LVGL 9.4.0 的 `preview` 执行界面测试并生成截图；资源更新方法见[界面说明](docs/design/README.md)。
 
 ## 使用
 
@@ -48,7 +50,7 @@ macOS 和 Linux 下使用 [project.sh](https://github.com/copfee/camera-rc-1.43c
 
 ## 验证与资料
 
-已有记录显示主机回归、原生 UI 预览及 ESP-IDF v5.5.3 构建通过；X-E5 重启重连已实机验证。全屏、音量和亮度设置的实机效果，以及新版人工配对交互、不同对焦模式、长按连拍和长期稳定性仍需验收。详细结果和适用版本见[验证记录](docs/verification.md)和[实机验收清单](docs/acceptance.md)。
+既有记录显示主机回归、原生 UI 预览及 ESP-IDF v5.5.3 构建通过；X-E5 原绑定在开发板断电重启后恢复连接已有一次实机记录。全屏、音量和亮度设置的实机效果，以及新版人工配对交互、不同对焦模式、长按连拍和长期稳定性仍需验收。详细结果和适用范围见[验证记录](docs/verification.md)和[实机验收清单](docs/acceptance.md)。
 
 - [硬件与故障排查](docs/hardware.md) · [协议说明](docs/protocol.md) · [架构与扩展](docs/architecture.md)
 - [界面设计与截图生成](docs/design/README.md) · [重连调查](docs/reconnect-investigation.md)
