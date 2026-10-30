@@ -44,17 +44,22 @@ writeResource(model, 'xe5_logo', modelChecksum);
 console.log(`X-E5 ${model.width}x${model.height}; source SHA-256: ${modelChecksum}`);
 
 // Matching ImageGen shutter states share one crop and output size.
+const idleSource = readFileSync(resolve(root, 'components/ui/assets/shutter_idle_source.png'));
 for (const [state, expected] of [
   ['idle', '7a541d19935610ea7d02a3f0a74b2103d8f7ddf45bed94e7000d3f39d49dfddd'],
-  ['pressed', '1f3e29cda31718950a3e3289a4405abdf6468ad3fe1fac4cfa105f15116ffaa2'],
+  ['pressed', '044058c2b8634b83e258d7a9b8373af880b92dbcb709056c82f0003df03b6f20'],
 ]) {
   const source = readFileSync(resolve(root, `components/ui/assets/shutter_${state}_source.png`));
   const checksum = createHash('sha256').update(source).digest('hex');
   if (checksum !== expected) throw new Error(`Shutter ${state} source SHA-256 mismatch`);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="260" height="260" viewBox="60 30 1150 1150"><image width="1271" height="1238" href="data:image/png;base64,${source.toString('base64')}"/></svg>`;
+  const {width: sourceWidth, height: sourceHeight} = PNG.sync.read(source);
+  const imageTag = `<image width="${sourceWidth}" height="${sourceHeight}" href="data:image/png;base64,${source.toString('base64')}"/>`;
+  // Keep the outer ring pixel-identical to idle; feather only the inner medallion edge.
+  const content = state === 'idle' ? imageTag : `<defs><radialGradient id="fade" gradientUnits="userSpaceOnUse" cx="635" cy="590" r="425"><stop offset="94%" stop-color="white"/><stop offset="100%" stop-color="black"/></radialGradient><mask id="inner" maskUnits="userSpaceOnUse" x="0" y="0" width="1271" height="1238"><rect width="1271" height="1238" fill="url(#fade)"/></mask></defs><image width="1271" height="1238" href="data:image/png;base64,${idleSource.toString('base64')}"/><g mask="url(#inner)">${imageTag}</g>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="260" height="260" viewBox="60 30 1150 1150">${content}</svg>`;
   const image = PNG.sync.read(new Resvg(svg).render().asPng());
   writeResource(image, `shutter_${state}`, checksum);
   console.log(`Shutter ${state} 260x260; source SHA-256: ${checksum}`);
-  const fullSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="466" height="466" viewBox="60 30 1150 1150"><image width="1271" height="1238" href="data:image/png;base64,${source.toString('base64')}"/></svg>`;
+  const fullSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="466" height="466" viewBox="60 30 1150 1150">${content}</svg>`;
   writeResource(PNG.sync.read(new Resvg(fullSvg).render().asPng()), `shutter_${state}_full`, checksum);
 }
